@@ -127,7 +127,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
 
     let mut history = ChartHistory::new();
     let mut chart_scale = ChartScale::Auto;
-    let tick_rate = Duration::from_millis(refresh_ms);
+    let mut tick_ms = refresh_ms;
     let mut last_tick = Instant::now();
 
     loop {
@@ -163,6 +163,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
         })?;
 
         // Handle input — drain all pending events, only process KeyPress (not Release/Repeat)
+        let tick_rate = Duration::from_millis(tick_ms);
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
         let mut should_quit = false;
         if event::poll(timeout)? {
@@ -182,14 +183,16 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                                 };
                             }
                             KeyCode::Char('+') | KeyCode::Char('=') => {
-                                let ms = handle.poll_ms();
-                                if ms > 100 {
-                                    handle.set_poll_ms(ms - 100);
+                                if tick_ms > 100 {
+                                    tick_ms -= 100;
+                                    handle.set_poll_ms(tick_ms);
                                 }
                             }
                             KeyCode::Char('-') => {
-                                let ms = handle.poll_ms();
-                                handle.set_poll_ms(ms + 100);
+                                if tick_ms < 2000 {
+                                    tick_ms += 100;
+                                    handle.set_poll_ms(tick_ms);
+                                }
                             }
                             _ => {}
                         }

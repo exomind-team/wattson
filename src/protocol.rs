@@ -122,6 +122,17 @@ pub fn parse_extended(payload: &[u8], profile: &DeviceProfile) -> Option<Extende
         return None;
     }
 
+    log::trace!(
+        "0x04 packet: mode=0x{:02x}, len={}, hex={}",
+        mode_byte,
+        payload.len(),
+        payload
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+
     let u16_be = |i: usize| -> u16 { u16::from_be_bytes([data[i * 2], data[i * 2 + 1]]) };
 
     let mut result = ExtendedData {

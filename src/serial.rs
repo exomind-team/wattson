@@ -24,8 +24,14 @@ struct PsuState {
     snapshot: PsuSnapshot,
     ac_history: Vec<f64>,
     dc_history: Vec<f64>,
+    ac_ema: Option<f64>,
     last_update: Option<Instant>,
 }
+
+/// EMA smoothing factor (0.0–1.0, lower = smoother)
+const AC_EMA_ALPHA: f64 = 0.3;
+/// Spike rejection threshold: reject if delta > 25% of EMA
+const AC_SPIKE_THRESHOLD: f64 = 0.25;
 
 impl PsuState {
     fn new() -> Self {
@@ -33,6 +39,7 @@ impl PsuState {
             snapshot: PsuSnapshot::default(),
             ac_history: Vec::with_capacity(16),
             dc_history: Vec::with_capacity(16),
+            ac_ema: None,
             last_update: None,
         }
     }
@@ -153,9 +160,9 @@ fn reader_loop(
                 }
                 log::info!("Connected to {}", port);
 
-                if mode == Mode::Active {
-                    let _ = serial.write(&QUERY_CMD);
-                }
+                // Always send query command at startup to trigger device model/serial broadcasts
+                let _ = serial.write(&QUERY_CMD);
+                log::debug!("Sent initial QUERY_CMD to {}", port);
 
                 if let Err(e) =
                     read_frames(&mut *serial, mode, &profile, poll_interval, &state, &stop)
@@ -196,6 +203,7 @@ fn read_frames(
     let mut buf = Vec::with_capacity(4096);
     let mut read_buf = [0u8; 512];
     let mut last_query = Instant::now();
+    let mut model_retry_at = Some(Instant::now() + Duration::from_secs(3));
 
     while !*stop.lock().unwrap() {
         // Read available bytes
@@ -210,6 +218,20 @@ fn read_frames(
         if mode == Mode::Active && last_query.elapsed() > poll_interval {
             let _ = serial.write(&QUERY_CMD);
             last_query = Instant::now();
+        }
+
+        // Retry model query if model is still empty after 3s
+        if let Some(retry_time) = model_retry_at {
+            if Instant::now() >= retry_time {
+                let model_empty = state.lock().unwrap().snapshot.device.model.is_empty();
+                if model_empty {
+                    log::debug!("Model still unknown, re-sending QUERY_CMD");
+                    let _ = serial.write(&QUERY_CMD);
+                    model_retry_at = Some(Instant::now() + Duration::from_secs(5));
+                } else {
+                    model_retry_at = None; // Got model, stop retrying
+                }
+            }
         }
 
         // Parse all complete frames
@@ -271,10 +293,34 @@ fn process_payload(payload: &[u8], profile: &DeviceProfile, state: &SharedState)
                 s.snapshot.thermal.temp_air_c = data.temp_air;
                 s.snapshot.thermal.temp_air2_c = data.temp_air2;
                 s.snapshot.fan.pwm = data.mode_byte;
-                s.snapshot.power.ac_input_w = data.ac_power;
 
-                // AC sliding average
-                s.ac_history.push(data.ac_power);
+                // AC power spike filtering with EMA
+                let raw_ac = data.ac_power;
+                let filtered_ac = match s.ac_ema {
+                    Some(ema) if ema > 10.0 => {
+                        let delta_pct = ((raw_ac - ema) / ema).abs();
+                        if delta_pct > AC_SPIKE_THRESHOLD {
+                            // Spike detected: blend slowly toward the new value
+                            log::debug!(
+                                "AC power spike: raw={:.1}W, ema={:.1}W, delta={:.1}%  (mode_byte=0x{:02x})",
+                                raw_ac, ema, delta_pct * 100.0, data.mode_byte
+                            );
+                            ema + (raw_ac - ema) * AC_EMA_ALPHA * 0.3
+                        } else {
+                            // Normal: standard EMA update
+                            ema + (raw_ac - ema) * AC_EMA_ALPHA
+                        }
+                    }
+                    _ => {
+                        // First sample or very low power: accept raw value
+                        raw_ac
+                    }
+                };
+                s.ac_ema = Some(filtered_ac);
+                s.snapshot.power.ac_input_w = filtered_ac;
+
+                // AC sliding average (uses filtered values)
+                s.ac_history.push(filtered_ac);
                 if s.ac_history.len() > 10 {
                     s.ac_history.remove(0);
                 }

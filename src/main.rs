@@ -140,6 +140,15 @@ fn cmd_read(config: &Config, duration: u64) {
     }
 
     let snap = handle.latest();
+    if !snap.meta.connected || snap.meta.packet_count == 0 {
+        eprintln!();
+        eprintln!("⚠ No data received from {}!", config.serial.port);
+        eprintln!("  Possible causes:");
+        eprintln!("  - Port is busy (close HiMOS or other serial monitor first)");
+        eprintln!("  - PSU USB cable not connected");
+        eprintln!("  - Wrong port (run 'wattson ports' to check)");
+        eprintln!();
+    }
     println!("{}", serde_json::to_string_pretty(&snap).unwrap());
     handle.stop();
 }

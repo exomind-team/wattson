@@ -143,19 +143,28 @@ fn reader_loop(
                     let mut s = state.lock().unwrap();
                     s.snapshot.meta.connected = true;
                 }
+                log::info!("Connected to {}", port);
 
                 if mode == Mode::Active {
                     let _ = serial.write(&QUERY_CMD);
                 }
 
-                if let Err(_) = read_frames(&mut *serial, mode, &profile, poll_interval, &state, &stop) {
+                if let Err(e) = read_frames(&mut *serial, mode, &profile, poll_interval, &state, &stop) {
+                    log::warn!("Read error: {}", e);
                     let mut s = state.lock().unwrap();
                     s.snapshot.meta.connected = false;
                 }
             }
-            Err(_) => {
+            Err(e) => {
                 let mut s = state.lock().unwrap();
                 s.snapshot.meta.connected = false;
+                let msg = format!("{}", e);
+                if msg.contains("Access") || msg.contains("拒绝") || msg.contains("PermissionError") {
+                    s.snapshot.meta.error_count += 1;
+                    log::error!("Port {} is busy (another program may be using it, e.g. HiMOS). Close that program first.", port);
+                } else {
+                    log::error!("Cannot open {}: {}", port, e);
+                }
             }
         }
 

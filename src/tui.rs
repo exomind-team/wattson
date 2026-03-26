@@ -127,10 +127,64 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
 
     let mut history = ChartHistory::new();
     let mut chart_scale = ChartScale::Auto;
-    let mut tick_ms = refresh_ms;
+    let mut tick_ms: u64 = refresh_ms.max(200); // minimum 200ms
+    handle.set_poll_ms(tick_ms);
     let mut last_tick = Instant::now();
 
     loop {
+        // Wait for either a tick or an event (whichever comes first)
+        let tick_rate = Duration::from_millis(tick_ms);
+        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        let mut should_quit = false;
+
+        if event::poll(timeout)? {
+            // Drain all pending events
+            loop {
+                if let Event::Key(key) = event::read()? {
+                    if key.kind == KeyEventKind::Press {
+                        match key.code {
+                            KeyCode::Char('q') => should_quit = true,
+                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                should_quit = true
+                            }
+                            KeyCode::Char('z') => {
+                                chart_scale = match chart_scale {
+                                    ChartScale::Zero => ChartScale::Auto,
+                                    ChartScale::Auto => ChartScale::Zero,
+                                };
+                            }
+                            KeyCode::Char('+') | KeyCode::Char('=') => {
+                                if tick_ms > 200 {
+                                    tick_ms -= 100;
+                                    handle.set_poll_ms(tick_ms);
+                                }
+                            }
+                            KeyCode::Char('-') => {
+                                if tick_ms < 2000 {
+                                    tick_ms += 100;
+                                    handle.set_poll_ms(tick_ms);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if !event::poll(Duration::ZERO)? {
+                    break;
+                }
+            }
+        }
+
+        if should_quit {
+            break;
+        }
+
+        // Only render when tick interval has elapsed
+        if last_tick.elapsed() < tick_rate {
+            continue;
+        }
+        last_tick = Instant::now();
+
         let snap = handle.latest();
 
         // Accumulate energy: power(W) * time(h) = Wh
@@ -161,56 +215,6 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                 chart_scale,
             );
         })?;
-
-        // Handle input — drain all pending events, only process KeyPress (not Release/Repeat)
-        let tick_rate = Duration::from_millis(tick_ms);
-        let timeout = tick_rate.saturating_sub(last_tick.elapsed());
-        let mut should_quit = false;
-        if event::poll(timeout)? {
-            loop {
-                if let Event::Key(key) = event::read()? {
-                    // Windows sends Press + Release for each keystroke; only handle Press
-                    if key.kind == KeyEventKind::Press {
-                        match key.code {
-                            KeyCode::Char('q') => should_quit = true,
-                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                should_quit = true
-                            }
-                            KeyCode::Char('z') => {
-                                chart_scale = match chart_scale {
-                                    ChartScale::Zero => ChartScale::Auto,
-                                    ChartScale::Auto => ChartScale::Zero,
-                                };
-                            }
-                            KeyCode::Char('+') | KeyCode::Char('=') => {
-                                if tick_ms > 100 {
-                                    tick_ms -= 100;
-                                    handle.set_poll_ms(tick_ms);
-                                }
-                            }
-                            KeyCode::Char('-') => {
-                                if tick_ms < 2000 {
-                                    tick_ms += 100;
-                                    handle.set_poll_ms(tick_ms);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                // Drain remaining events without blocking
-                if !event::poll(Duration::ZERO)? {
-                    break;
-                }
-            }
-        }
-        if should_quit {
-            break;
-        }
-
-        if last_tick.elapsed() >= tick_rate {
-            last_tick = Instant::now();
-        }
     }
 
     disable_raw_mode()?;

@@ -82,7 +82,7 @@ impl PsuHandle {
 
     /// Set poll interval in milliseconds (min 100, max 5000)
     pub fn set_poll_ms(&self, ms: u64) {
-        let ms = ms.clamp(100, 5000);
+        let ms = ms.clamp(200, 5000);
         *self.poll_ms.lock().unwrap() = ms;
     }
 }

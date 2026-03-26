@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -162,34 +162,37 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
             );
         })?;
 
-        // Handle input — drain all pending events to avoid mouse scroll triggering rapid redraws
+        // Handle input — drain all pending events, only process KeyPress (not Release/Repeat)
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
         let mut should_quit = false;
         if event::poll(timeout)? {
             loop {
                 if let Event::Key(key) = event::read()? {
-                    match key.code {
-                        KeyCode::Char('q') => should_quit = true,
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            should_quit = true
-                        }
-                        KeyCode::Char('z') => {
-                            chart_scale = match chart_scale {
-                                ChartScale::Zero => ChartScale::Auto,
-                                ChartScale::Auto => ChartScale::Zero,
-                            };
-                        }
-                        KeyCode::Char('+') | KeyCode::Char('=') => {
-                            let ms = handle.poll_ms();
-                            if ms > 100 {
-                                handle.set_poll_ms(ms - 100);
+                    // Windows sends Press + Release for each keystroke; only handle Press
+                    if key.kind == KeyEventKind::Press {
+                        match key.code {
+                            KeyCode::Char('q') => should_quit = true,
+                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                should_quit = true
                             }
+                            KeyCode::Char('z') => {
+                                chart_scale = match chart_scale {
+                                    ChartScale::Zero => ChartScale::Auto,
+                                    ChartScale::Auto => ChartScale::Zero,
+                                };
+                            }
+                            KeyCode::Char('+') | KeyCode::Char('=') => {
+                                let ms = handle.poll_ms();
+                                if ms > 100 {
+                                    handle.set_poll_ms(ms - 100);
+                                }
+                            }
+                            KeyCode::Char('-') => {
+                                let ms = handle.poll_ms();
+                                handle.set_poll_ms(ms + 100);
+                            }
+                            _ => {}
                         }
-                        KeyCode::Char('-') => {
-                            let ms = handle.poll_ms();
-                            handle.set_poll_ms(ms + 100);
-                        }
-                        _ => {}
                     }
                 }
                 // Drain remaining events without blocking

@@ -1,0 +1,25 @@
+[package]
+name = "wattson"
+version = "0.1.0"
+edition = "2021"
+description = "Universal digital PSU monitoring library — read real-time power consumption via serial protocols"
+authors = ["ExoMind Team"]
+license = "CCOPL-1.0"
+repository = "https://github.com/exomind-team/wattson"
+readme = "README.md"
+keywords = ["psu", "power-supply", "serial", "monitoring", "energy"]
+categories = ["hardware-support", "embedded"]
+
+[dependencies]
+serialport = "4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+log = "0.4"
+
+[dev-dependencies]
+env_logger = "0.11"
+
+[[example]]
+name = "json_dump"
+path = "examples/json_dump.rs"

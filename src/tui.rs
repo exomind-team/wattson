@@ -14,6 +14,7 @@ use ratatui::widgets::{
 
 use crate::config::Config;
 use crate::data::PsuSnapshot;
+use crate::history::History;
 use crate::serial::PsuHandle;
 
 /// Maximum number of samples in chart history
@@ -117,6 +118,11 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // Load persistent history
+    let mut persistent = History::load();
+    let history_wh_base = persistent.total_wh;
+    let history_duration_base = persistent.total_duration_s;
+
     let mut cost = CostState {
         total_wh: 0.0,
         last_sample: Instant::now(),
@@ -125,7 +131,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
         currency: config.cost.currency.clone(),
     };
 
-    let mut history = ChartHistory::new();
+    let mut chart_history = ChartHistory::new();
     let mut chart_scale = ChartScale::Auto;
     let mut tick_ms: u64 = refresh_ms.max(200);
     let mut last_tick = Instant::now();
@@ -202,14 +208,17 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
         cost.last_sample = Instant::now();
 
         // Push to chart history
-        history.push(snap.power.ac_input_w, snap.power.dc_output_est_w);
+        chart_history.push(snap.power.ac_input_w, snap.power.dc_output_est_w);
 
-        let total_kwh = cost.total_wh / 1000.0;
-        let total_cost = total_kwh * cost.price_per_kwh;
         let duration_s = cost.start_time.elapsed().as_secs_f64();
-        let duration_h = duration_s / 3600.0;
-        let session_avg_w = if duration_h > 0.0 {
-            cost.total_wh / duration_h
+        // All-time totals (history + current session)
+        let alltime_wh = history_wh_base + cost.total_wh;
+        let alltime_duration_s = history_duration_base + duration_s;
+        let alltime_duration_h = alltime_duration_s / 3600.0;
+        let alltime_kwh = alltime_wh / 1000.0;
+        let alltime_cost = alltime_kwh * cost.price_per_kwh;
+        let alltime_avg_w = if alltime_duration_h > 0.0 {
+            alltime_wh / alltime_duration_h
         } else {
             snap.power.ac_input_w
         };
@@ -220,17 +229,25 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
             render_ui(
                 f,
                 &snap,
-                total_kwh,
-                total_cost,
+                alltime_kwh,
+                alltime_cost,
                 &currency,
                 price,
-                duration_s,
-                &history,
-                session_avg_w,
+                alltime_duration_s,
+                &chart_history,
+                alltime_avg_w,
                 chart_scale,
                 tick_ms,
             );
         })?;
+    }
+
+    // Save history on exit
+    let session_duration = cost.start_time.elapsed().as_secs_f64();
+    persistent.finish_session(cost.total_wh, session_duration);
+    match persistent.save() {
+        Ok(path) => log::info!("History saved to {}", path.display()),
+        Err(e) => log::warn!("Failed to save history: {}", e),
     }
 
     disable_raw_mode()?;

@@ -4,9 +4,9 @@
 
 **Universal Digital PSU Monitoring Library**
 
-*Read real-time power consumption from your computer via serial protocols.*
+**Universal Digital PSU Monitoring Library — Energy Sensing Layer of the [ExoMind](https://github.com/exomind-team/exomind) Ecosystem**
 
-通用数字电源监控库 — 通过串口协议读取计算机实时功耗
+通用数字电源监控库 — [ExoMind](https://github.com/exomind-team/exomind) 生态的能量感知层
 
 [![License: CCOPL-1.0](https://img.shields.io/badge/License-CCOPL--1.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
@@ -198,6 +198,8 @@ Copyright (c) 2026 ExoMind Collective
 
 <div align="center">
 
-*Part of the [ExoMind](https://github.com/exomind-team) ecosystem — Cognitive Life Science*
+**Part of the [ExoMind](https://github.com/exomind-team/exomind) ecosystem**
+
+[ExoMind](https://github.com/exomind-team/exomind) · [ExoMind Cell](https://github.com/exomind-team/exomind-cell) · [CCOPL License](https://github.com/exomind-team/ccopl)
 
 </div>

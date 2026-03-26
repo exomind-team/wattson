@@ -20,9 +20,9 @@
 
 <div align="center">
 
-![Wattson Demo — DM-1000G 60s Real-time Data](assets/demo_chart.png)
+![Wattson TUI Dashboard — DM-1000GD Real-time Monitoring](assets/demo_tui.png)
 
-*60-second real-time capture from Segotep DM-1000G (1000W 80Plus Gold)*
+*TUI dashboard: power trend chart, DC rails, thermal & fan, cost tracking*
 
 </div>
 

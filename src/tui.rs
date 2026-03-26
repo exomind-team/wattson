@@ -77,6 +77,36 @@ impl ChartHistory {
         let dc_max = self.dc_power.iter().cloned().fold(0.0_f64, f64::max);
         ac_max.max(dc_max).max(50.0) // minimum 50W scale
     }
+
+    fn min_power(&self) -> f64 {
+        let ac_min = self
+            .ac_power
+            .iter()
+            .cloned()
+            .filter(|&v| v > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let dc_min = self
+            .dc_power
+            .iter()
+            .cloned()
+            .filter(|&v| v > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let min = ac_min.min(dc_min);
+        if min.is_infinite() {
+            0.0
+        } else {
+            min
+        }
+    }
+}
+
+/// Chart Y-axis mode
+#[derive(Clone, Copy, PartialEq)]
+enum ChartScale {
+    /// Y starts from 0W (full range, honest)
+    Zero,
+    /// Y auto-zooms to data range (shows detail)
+    Auto,
 }
 
 /// Run the TUI dashboard
@@ -96,6 +126,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
     };
 
     let mut history = ChartHistory::new();
+    let mut chart_scale = ChartScale::Auto;
     let tick_rate = Duration::from_millis(refresh_ms);
     let mut last_tick = Instant::now();
 
@@ -127,19 +158,48 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                 duration_s,
                 &history,
                 snap.power.ac_input_avg_w,
+                chart_scale,
             );
         })?;
 
-        // Handle input
+        // Handle input — drain all pending events to avoid mouse scroll triggering rapid redraws
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
+        let mut should_quit = false;
         if event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => break,
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                    _ => {}
+            loop {
+                if let Event::Key(key) = event::read()? {
+                    match key.code {
+                        KeyCode::Char('q') => should_quit = true,
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            should_quit = true
+                        }
+                        KeyCode::Char('z') => {
+                            chart_scale = match chart_scale {
+                                ChartScale::Zero => ChartScale::Auto,
+                                ChartScale::Auto => ChartScale::Zero,
+                            };
+                        }
+                        KeyCode::Char('+') | KeyCode::Char('=') => {
+                            let ms = handle.poll_ms();
+                            if ms > 100 {
+                                handle.set_poll_ms(ms - 100);
+                            }
+                        }
+                        KeyCode::Char('-') => {
+                            let ms = handle.poll_ms();
+                            handle.set_poll_ms(ms + 100);
+                        }
+                        _ => {}
+                    }
+                }
+                // Drain remaining events without blocking
+                if !event::poll(Duration::ZERO)? {
+                    break;
                 }
             }
+        }
+        if should_quit {
+            break;
         }
 
         if last_tick.elapsed() >= tick_rate {
@@ -163,6 +223,7 @@ fn render_ui(
     duration_s: f64,
     history: &ChartHistory,
     ac_avg_w: f64,
+    chart_scale: ChartScale,
 ) {
     let area = f.area();
 
@@ -218,7 +279,7 @@ fn render_ui(
     render_dc_panel(f, snap, middle_chunks[1]);
 
     // Chart section
-    render_power_chart(f, history, main_chunks[2]);
+    render_power_chart(f, history, chart_scale, main_chunks[2]);
 
     // Bottom section: thermal+fan (left) + cost (right)
     let bottom_chunks = Layout::default()
@@ -238,10 +299,10 @@ fn render_ui(
         bottom_chunks[1],
     );
 
-    // Status bar
+    // Status bar — show hotkeys and poll speed
     let status_text = format!(
-        " Packets: {} | Errors: {} | Age: {:.1}s | Samples: {} | Press 'q' to exit",
-        snap.meta.packet_count, snap.meta.error_count, snap.meta.data_age_s, history.sample_count,
+        " q:quit  z:scale  +/-:speed({}ms)  Age:{:.0}s",
+        snap.meta.poll_ms, snap.meta.data_age_s,
     );
     let status = Paragraph::new(status_text).style(Style::default().fg(Color::DarkGray));
     f.render_widget(status, main_chunks[4]);
@@ -340,11 +401,26 @@ fn render_dc_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
     f.render_widget(table, area);
 }
 
-fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
+fn render_power_chart(f: &mut Frame, history: &ChartHistory, scale: ChartScale, area: Rect) {
     let ac_points = history.ac_data_points();
     let dc_points = history.dc_data_points();
     let max_y = history.max_power() * 1.15;
     let x_len = CHART_HISTORY_LEN as f64;
+
+    let (y_min, y_max) = match scale {
+        ChartScale::Zero => (0.0, max_y),
+        ChartScale::Auto => {
+            let min = history.min_power();
+            let range = max_y / 1.15 - min; // raw range without padding
+            let padding = (range * 0.2).max(10.0);
+            ((min - padding).max(0.0), min + range + padding)
+        }
+    };
+
+    let scale_label = match scale {
+        ChartScale::Zero => "0-base",
+        ChartScale::Auto => "auto",
+    };
 
     // DC drawn first (underneath), AC drawn last (on top, more important)
     let datasets = vec![
@@ -374,19 +450,19 @@ fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
         Line::from("now"),
     ];
     let y_labels = vec![
-        Span::raw("0W"),
-        Span::raw(format!("{}W", max_y as u32 / 2)),
-        Span::raw(format!("{}W", max_y as u32)),
+        Span::raw(format!("{}W", y_min as u32)),
+        Span::raw(format!("{}W", ((y_min + y_max) / 2.0) as u32)),
+        Span::raw(format!("{}W", y_max as u32)),
     ];
 
     let chart = Chart::new(datasets)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Power Trend "),
+                .title(format!(" Power Trend [{}] ", scale_label)),
         )
         .x_axis(Axis::default().labels(x_labels).bounds([0.0, x_len]))
-        .y_axis(Axis::default().labels(y_labels).bounds([0.0, max_y]))
+        .y_axis(Axis::default().labels(y_labels).bounds([y_min, y_max]))
         .legend_position(None);
 
     f.render_widget(chart, area);

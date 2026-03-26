@@ -48,6 +48,7 @@ impl PsuState {
 pub struct PsuHandle {
     state: SharedState,
     stop: Arc<Mutex<bool>>,
+    poll_ms: Arc<Mutex<u64>>,
     _thread: thread::JoinHandle<()>,
 }
 
@@ -60,6 +61,7 @@ impl PsuHandle {
             .last_update
             .map(|t| t.elapsed().as_secs_f64())
             .unwrap_or(f64::INFINITY);
+        snap.meta.poll_ms = *self.poll_ms.lock().unwrap();
         snap
     }
 
@@ -71,6 +73,17 @@ impl PsuHandle {
     /// Stop the monitor
     pub fn stop(self) {
         *self.stop.lock().unwrap() = true;
+    }
+
+    /// Get current poll interval in milliseconds
+    pub fn poll_ms(&self) -> u64 {
+        *self.poll_ms.lock().unwrap()
+    }
+
+    /// Set poll interval in milliseconds (min 100, max 5000)
+    pub fn set_poll_ms(&self, ms: u64) {
+        let ms = ms.clamp(100, 5000);
+        *self.poll_ms.lock().unwrap() = ms;
     }
 }
 
@@ -111,9 +124,11 @@ impl PsuMonitor {
     pub fn start(self) -> Result<PsuHandle> {
         let state: SharedState = Arc::new(Mutex::new(PsuState::new()));
         let stop = Arc::new(Mutex::new(false));
+        let poll_ms = Arc::new(Mutex::new(self.poll_interval.as_millis() as u64));
 
         let state_clone = state.clone();
         let stop_clone = stop.clone();
+        let poll_ms_clone = poll_ms.clone();
 
         let thread = thread::Builder::new()
             .name("wattson-reader".into())
@@ -123,7 +138,7 @@ impl PsuMonitor {
                     self.baud,
                     self.mode,
                     self.profile,
-                    self.poll_interval,
+                    poll_ms_clone,
                     state_clone,
                     stop_clone,
                 );
@@ -133,6 +148,7 @@ impl PsuMonitor {
         Ok(PsuHandle {
             state,
             stop,
+            poll_ms,
             _thread: thread,
         })
     }
@@ -143,7 +159,7 @@ fn reader_loop(
     baud: u32,
     mode: Mode,
     profile: DeviceProfile,
-    poll_interval: Duration,
+    poll_ms: Arc<Mutex<u64>>,
     state: SharedState,
     stop: Arc<Mutex<bool>>,
 ) {
@@ -163,9 +179,7 @@ fn reader_loop(
                 let _ = serial.write(&QUERY_CMD);
                 log::debug!("Sent initial QUERY_CMD to {}", port);
 
-                if let Err(e) =
-                    read_frames(&mut *serial, mode, &profile, poll_interval, &state, &stop)
-                {
+                if let Err(e) = read_frames(&mut *serial, mode, &profile, &poll_ms, &state, &stop) {
                     log::warn!("Read error: {}", e);
                     let mut s = state.lock().unwrap();
                     s.snapshot.meta.connected = false;
@@ -195,7 +209,7 @@ fn read_frames(
     serial: &mut dyn SerialPort,
     mode: Mode,
     profile: &DeviceProfile,
-    poll_interval: Duration,
+    poll_ms: &Arc<Mutex<u64>>,
     state: &SharedState,
     stop: &Arc<Mutex<bool>>,
 ) -> Result<()> {
@@ -213,12 +227,12 @@ fn read_frames(
             Err(e) => return Err(WattsonError::Io(e)),
         }
 
-        // Periodic query: active mode uses poll_interval, passive mode uses 2s
-        // Sending QUERY_CMD in passive mode too ensures fresh 0x04 (AC power) data
+        // Periodic query: read dynamic poll interval from shared state
+        let current_poll = Duration::from_millis(*poll_ms.lock().unwrap());
         let query_interval = if mode == Mode::Active {
-            poll_interval
+            current_poll
         } else {
-            Duration::from_secs(2)
+            current_poll.max(Duration::from_secs(1)) // passive: at least 1s
         };
         if last_query.elapsed() > query_interval {
             let _ = serial.write(&QUERY_CMD);

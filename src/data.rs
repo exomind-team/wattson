@@ -92,6 +92,13 @@ pub struct MetaData {
     pub connected: bool,
     /// Seconds since last valid data
     pub data_age_s: f64,
+    /// Current poll interval in ms (for display)
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub poll_ms: u64,
+}
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 /// Device-specific calibration profile

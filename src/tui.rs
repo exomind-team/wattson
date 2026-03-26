@@ -435,9 +435,11 @@ fn render_cost_panel(
     let minutes = ((duration_s % 3600.0) / 60.0) as u64;
     let secs = (duration_s % 60.0) as u64;
 
-    // Daily projection based on current average power
+    // Projections based on current average power
     let daily_kwh = ac_avg_w * 24.0 / 1000.0;
     let daily_cost = daily_kwh * price;
+    let weekly_cost = daily_cost * 7.0;
+    let monthly_cost = daily_cost * 30.0;
 
     let lines = vec![
         Line::from(format!(
@@ -449,9 +451,12 @@ fn render_cost_panel(
             price, currency, hours, minutes, secs
         )),
         Line::from(vec![
-            Span::raw("  24h est: "),
+            Span::raw("  Est: "),
             Span::styled(
-                format!("{:.2} kWh | {:.2} {}", daily_kwh, daily_cost, currency),
+                format!(
+                    "{:.1}kWh/d {:.1}{}/d {:.0}{}/w {:.0}{}/m",
+                    daily_kwh, daily_cost, currency, weekly_cost, currency, monthly_cost, currency
+                ),
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),

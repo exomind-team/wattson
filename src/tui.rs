@@ -56,7 +56,9 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
         let price = cost.price_per_kwh;
 
         terminal.draw(|f| {
-            render_ui(f, &snap, total_kwh, total_cost, &currency, price, duration_s);
+            render_ui(
+                f, &snap, total_kwh, total_cost, &currency, price, duration_s,
+            );
         })?;
 
         // Handle input
@@ -96,7 +98,7 @@ fn render_ui(
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // device info
+            Constraint::Length(3), // device info
             Constraint::Min(10),   // middle section
             Constraint::Length(7), // bottom section
             Constraint::Length(1), // status bar
@@ -149,7 +151,15 @@ fn render_ui(
         .split(main_chunks[2]);
 
     render_thermal_panel(f, snap, bottom_chunks[0]);
-    render_cost_panel(f, total_kwh, total_cost, currency, price, duration_s, bottom_chunks[1]);
+    render_cost_panel(
+        f,
+        total_kwh,
+        total_cost,
+        currency,
+        price,
+        duration_s,
+        bottom_chunks[1],
+    );
 
     // Status bar
     let status_text = format!(
@@ -174,30 +184,22 @@ fn render_power_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
             Span::raw("  AC Input:  "),
             Span::styled(
                 format!("{:>7.1} W", snap.power.ac_input_w),
-                Style::default()
-                    .fg(ac_color)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(ac_color).add_modifier(Modifier::BOLD),
             ),
         ]),
-        Line::from(format!(
-            "  AC Avg:    {:>7.1} W",
-            snap.power.ac_input_avg_w
-        )),
+        Line::from(format!("  AC Avg:    {:>7.1} W", snap.power.ac_input_avg_w)),
         Line::from(format!(
             "  DC Output: {:>7.1} W",
             snap.power.dc_output_est_w
         )),
-        Line::from(format!(
-            "  Efficiency:{:>6.1} %",
-            snap.power.efficiency_pct
-        )),
+        Line::from(format!("  Efficiency:{:>6.1} %", snap.power.efficiency_pct)),
         Line::from(""),
         Line::from(format!("  AC Voltage:{:>6.1} V", snap.ac.voltage_v)),
         Line::from(format!("  AC Freq:   {:>6.1} Hz", snap.ac.frequency_hz)),
     ];
 
-    let block = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Power "));
+    let block =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Power "));
     f.render_widget(block, area);
 }
 
@@ -287,12 +289,11 @@ fn render_thermal_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
         )),
     ];
 
-    let block = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Thermal & Fan "),
-        );
+    let block = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Thermal & Fan "),
+    );
     f.render_widget(block, area);
 }
 
@@ -319,7 +320,6 @@ fn render_cost_panel(
         )),
     ];
 
-    let block = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Cost "));
+    let block = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Cost "));
     f.render_widget(block, area);
 }

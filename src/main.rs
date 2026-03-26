@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
@@ -97,8 +97,7 @@ fn resolve_profile(config: &Config) -> DeviceProfile {
 }
 
 fn create_monitor(config: &Config) -> PsuMonitor {
-    PsuMonitor::new(&config.serial.port, resolve_mode(config))
-        .with_profile(resolve_profile(config))
+    PsuMonitor::new(&config.serial.port, resolve_mode(config)).with_profile(resolve_profile(config))
 }
 
 fn main() {
@@ -111,7 +110,11 @@ fn main() {
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Tui { refresh } => cmd_tui(&config, refresh),
         Commands::Serve { port } => cmd_serve(&mut config, port),
-        Commands::Chart { last, input, output } => cmd_chart(&config, last, &input, output),
+        Commands::Chart {
+            last,
+            input,
+            output,
+        } => cmd_chart(&config, last, &input, output),
         Commands::Info => cmd_info(&config),
         Commands::Cost => cmd_cost(&config),
         Commands::Ports => cmd_ports(),
@@ -193,22 +196,18 @@ fn cmd_config(config: &mut Config, action: ConfigAction) {
                 toml::to_string_pretty(config).unwrap_or_else(|_| "Error serializing".into())
             );
         }
-        ConfigAction::Set { key, value } => {
-            match config.set_value(&key, &value) {
-                Ok(()) => {
-                    match config.save() {
-                        Ok(path) => println!("Set {} = {} (saved to {})", key, value, path.display()),
-                        Err(e) => {
-                            eprintln!("Warning: set in memory but failed to save: {}", e);
-                        }
-                    }
-                }
+        ConfigAction::Set { key, value } => match config.set_value(&key, &value) {
+            Ok(()) => match config.save() {
+                Ok(path) => println!("Set {} = {} (saved to {})", key, value, path.display()),
                 Err(e) => {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
+                    eprintln!("Warning: set in memory but failed to save: {}", e);
                 }
+            },
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
             }
-        }
+        },
         ConfigAction::Init => match Config::init_default() {
             Ok(path) => println!("Created {}", path.display()),
             Err(e) => {
@@ -255,7 +254,7 @@ fn cmd_serve(config: &mut Config, port_override: Option<u16>) {
     rt.block_on(wattson::api::serve(handle, config));
 }
 
-fn cmd_chart(config: &Config, last: Option<usize>, input: &PathBuf, output: Option<PathBuf>) {
+fn cmd_chart(config: &Config, last: Option<usize>, input: &Path, output: Option<PathBuf>) {
     let mut data = match wattson::chart::load_data_points(input) {
         Ok(d) => d,
         Err(e) => {
@@ -270,9 +269,8 @@ fn cmd_chart(config: &Config, last: Option<usize>, input: &PathBuf, output: Opti
         }
     }
 
-    let out = output.unwrap_or_else(|| {
-        PathBuf::from(&config.chart.output_dir).join("wattson_chart.png")
-    });
+    let out =
+        output.unwrap_or_else(|| PathBuf::from(&config.chart.output_dir).join("wattson_chart.png"));
 
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).ok();
@@ -313,8 +311,22 @@ fn cmd_info(config: &Config) {
     }
 
     let snap = handle.latest();
-    println!("Model:      {}", if snap.device.model.is_empty() { "N/A" } else { &snap.device.model });
-    println!("Serial:     {}", if snap.device.serial.is_empty() { "N/A" } else { &snap.device.serial });
+    println!(
+        "Model:      {}",
+        if snap.device.model.is_empty() {
+            "N/A"
+        } else {
+            &snap.device.model
+        }
+    );
+    println!(
+        "Serial:     {}",
+        if snap.device.serial.is_empty() {
+            "N/A"
+        } else {
+            &snap.device.serial
+        }
+    );
     println!("Connected:  {}", snap.meta.connected);
     println!("Packets:    {}", snap.meta.packet_count);
     println!("Port:       {}", config.serial.port);

@@ -1,5 +1,5 @@
 use std::time::Duration;
-use wattson::{PsuMonitor, Mode, DeviceProfile};
+use wattson::{DeviceProfile, Mode, PsuMonitor};
 
 fn main() {
     let mut port = "COM4".to_string();
@@ -11,7 +11,9 @@ fn main() {
         match args[i].as_str() {
             "--port" | "-p" => {
                 i += 1;
-                if i < args.len() { port = args[i].clone(); }
+                if i < args.len() {
+                    port = args[i].clone();
+                }
             }
             "--watch" | "-w" => watch = true,
             "--help" | "-h" => {
@@ -27,8 +29,7 @@ fn main() {
 
     eprintln!("Connecting to {} ...", port);
 
-    let monitor = PsuMonitor::new(&port, Mode::Passive)
-        .with_profile(DeviceProfile::SEGOTEP_DM);
+    let monitor = PsuMonitor::new(&port, Mode::Passive).with_profile(DeviceProfile::SEGOTEP_DM);
 
     let handle = match monitor.start() {
         Ok(h) => h,

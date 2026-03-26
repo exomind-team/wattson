@@ -72,9 +72,7 @@ pub async fn serve(handle: PsuHandle, config: &Config) {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("Failed to bind API server");
-    axum::serve(listener, app)
-        .await
-        .expect("API server error");
+    axum::serve(listener, app).await.expect("API server error");
 }
 
 async fn get_status(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {

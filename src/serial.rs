@@ -50,7 +50,8 @@ impl PsuHandle {
     pub fn latest(&self) -> PsuSnapshot {
         let state = self.state.lock().unwrap();
         let mut snap = state.snapshot.clone();
-        snap.meta.data_age_s = state.last_update
+        snap.meta.data_age_s = state
+            .last_update
             .map(|t| t.elapsed().as_secs_f64())
             .unwrap_or(f64::INFINITY);
         snap
@@ -111,10 +112,17 @@ impl PsuMonitor {
         let thread = thread::Builder::new()
             .name("wattson-reader".into())
             .spawn(move || {
-                reader_loop(self.port, self.baud, self.mode, self.profile,
-                           self.poll_interval, state_clone, stop_clone);
+                reader_loop(
+                    self.port,
+                    self.baud,
+                    self.mode,
+                    self.profile,
+                    self.poll_interval,
+                    state_clone,
+                    stop_clone,
+                );
             })
-            .map_err(|e| WattsonError::Io(e))?;
+            .map_err(WattsonError::Io)?;
 
         Ok(PsuHandle {
             state,
@@ -149,7 +157,9 @@ fn reader_loop(
                     let _ = serial.write(&QUERY_CMD);
                 }
 
-                if let Err(e) = read_frames(&mut *serial, mode, &profile, poll_interval, &state, &stop) {
+                if let Err(e) =
+                    read_frames(&mut *serial, mode, &profile, poll_interval, &state, &stop)
+                {
                     log::warn!("Read error: {}", e);
                     let mut s = state.lock().unwrap();
                     s.snapshot.meta.connected = false;
@@ -159,7 +169,8 @@ fn reader_loop(
                 let mut s = state.lock().unwrap();
                 s.snapshot.meta.connected = false;
                 let msg = format!("{}", e);
-                if msg.contains("Access") || msg.contains("拒绝") || msg.contains("PermissionError") {
+                if msg.contains("Access") || msg.contains("拒绝") || msg.contains("PermissionError")
+                {
                     s.snapshot.meta.error_count += 1;
                     log::error!("Port {} is busy (another program may be using it, e.g. HiMOS). Close that program first.", port);
                 } else {

@@ -18,8 +18,8 @@ pub struct DataPoint {
 
 /// Parse data points from a JSON-lines file (one PsuSnapshot per line)
 pub fn load_data_points(input: &Path) -> Result<Vec<DataPoint>, String> {
-    let content =
-        std::fs::read_to_string(input).map_err(|e| format!("Failed to read {}: {}", input.display(), e))?;
+    let content = std::fs::read_to_string(input)
+        .map_err(|e| format!("Failed to read {}: {}", input.display(), e))?;
 
     let mut points = Vec::new();
     for (i, line) in content.lines().enumerate() {
@@ -83,8 +83,7 @@ pub fn generate_chart(
         return Err("No data to chart".to_string());
     }
 
-    let root = BitMapBackend::new(output, (1200, 900))
-        .into_drawing_area();
+    let root = BitMapBackend::new(output, (1200, 900)).into_drawing_area();
     root.fill(&WHITE)
         .map_err(|e| format!("Drawing error: {}", e))?;
 
@@ -104,11 +103,7 @@ pub fn generate_chart(
     });
     let eff_range = (eff_min - 5.0).max(0.0)..(eff_max + 5.0).min(100.0);
 
-    let max_temp = data
-        .iter()
-        .map(|d| d.temp_main_c)
-        .fold(0.0f64, f64::max)
-        * 1.2;
+    let max_temp = data.iter().map(|d| d.temp_main_c).fold(0.0f64, f64::max) * 1.2;
     let max_temp = if max_temp < 10.0 { 60.0 } else { max_temp };
 
     // Split into 3 vertical panels

@@ -129,6 +129,7 @@ impl Default for ApiConfig {
     }
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -171,8 +172,7 @@ impl Config {
     pub fn load_from(path: &Path) -> Result<Self, String> {
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        toml::from_str(&content)
-            .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
+        toml::from_str(&content).map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
     }
 
     /// Save config to the given path (or default location)
@@ -190,8 +190,7 @@ impl Config {
         }
         let content = toml::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        fs::write(path, content)
-            .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+        fs::write(path, content).map_err(|e| format!("Failed to write {}: {}", path.display(), e))
     }
 
     /// Set a dotted config key (e.g. "serial.port") to a value string
@@ -205,7 +204,10 @@ impl Config {
             }
             "serial.mode" => {
                 if value != "passive" && value != "active" {
-                    return Err(format!("Invalid mode: {} (use 'passive' or 'active')", value));
+                    return Err(format!(
+                        "Invalid mode: {} (use 'passive' or 'active')",
+                        value
+                    ));
                 }
                 self.serial.mode = value.to_string();
             }

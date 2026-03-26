@@ -66,7 +66,7 @@ pub fn find_frame(buf: &[u8]) -> Option<(Vec<u8>, usize)> {
     while i < buf.len().saturating_sub(4) {
         if buf[i] == HEADER[0] && buf[i + 1] == HEADER[1] {
             let pkt_len = buf[i + 2] as usize;
-            if pkt_len < 4 || pkt_len > 200 {
+            if !(4..=200).contains(&pkt_len) {
                 i += 1;
                 continue;
             }
@@ -89,9 +89,8 @@ pub fn parse_electrical(payload: &[u8], profile: &DeviceProfile) -> Option<Elect
         return None;
     }
 
-    let u16_le = |offset: usize| -> u16 {
-        u16::from_le_bytes([payload[offset], payload[offset + 1]])
-    };
+    let u16_le =
+        |offset: usize| -> u16 { u16::from_le_bytes([payload[offset], payload[offset + 1]]) };
 
     let raw: Vec<u16> = (0..13).map(|i| u16_le(1 + i * 2)).collect();
 
@@ -123,9 +122,7 @@ pub fn parse_extended(payload: &[u8], profile: &DeviceProfile) -> Option<Extende
         return None;
     }
 
-    let u16_be = |i: usize| -> u16 {
-        u16::from_be_bytes([data[i * 2], data[i * 2 + 1]])
-    };
+    let u16_be = |i: usize| -> u16 { u16::from_be_bytes([data[i * 2], data[i * 2 + 1]]) };
 
     let mut result = ExtendedData {
         mode_byte,
@@ -153,7 +150,11 @@ pub fn parse_model(payload: &[u8]) -> Option<String> {
         .trim_matches('\0')
         .trim()
         .to_string();
-    if text.is_empty() { None } else { Some(text) }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 /// Parse 0x05 serial number string
@@ -165,7 +166,11 @@ pub fn parse_serial(payload: &[u8]) -> Option<String> {
         .trim_matches('\0')
         .trim()
         .to_string();
-    if text.is_empty() { None } else { Some(text) }
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ pub struct PsuSnapshot {
     pub dc: DcData,
     pub thermal: ThermalData,
     pub fan: FanData,
+    pub cost: CostData,
     pub meta: MetaData,
 }
 
@@ -61,6 +62,27 @@ pub struct ThermalData {
 pub struct FanData {
     pub rpm: u32,
     pub pwm: u8,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CostData {
+    pub total_kwh: f64,
+    pub total_cost: f64,
+    pub currency: String,
+    pub price_per_kwh: f64,
+    pub monitoring_duration_s: f64,
+}
+
+impl Default for CostData {
+    fn default() -> Self {
+        Self {
+            total_kwh: 0.0,
+            total_cost: 0.0,
+            currency: "CNY".to_string(),
+            price_per_kwh: 0.56,
+            monitoring_duration_s: 0.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

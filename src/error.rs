@@ -11,6 +11,9 @@ pub enum WattsonError {
     #[error("Protocol error: {message}")]
     Protocol { message: String },
 
+    #[error("Configuration error: {message}")]
+    Config { message: String },
+
     #[error("Device not connected")]
     NotConnected,
 

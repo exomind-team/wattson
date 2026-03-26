@@ -1,0 +1,18 @@
+[serial]
+port = "COM4"
+baud = 115200
+mode = "passive"
+
+[device]
+profile = "segotep_dm"
+
+[cost]
+price_per_kwh = 0.56
+currency = "CNY"
+
+[chart]
+output_dir = "./charts"
+watermark = "Wattson | exomind-team/wattson"
+
+[api]
+port = 8066

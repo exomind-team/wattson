@@ -15,11 +15,16 @@
 //! println!("AC Input: {:.1}W", snapshot.power.ac_input_w);
 //! ```
 
+pub mod api;
+pub mod chart;
+pub mod config;
 pub mod data;
 pub mod error;
 pub mod protocol;
 pub mod serial;
+pub mod tui;
 
-pub use data::{PsuSnapshot, DeviceProfile};
-pub use error::{WattsonError, Result};
-pub use serial::{PsuMonitor, PsuHandle, Mode};
+pub use config::Config;
+pub use data::{CostData, DeviceProfile, PsuSnapshot};
+pub use error::{Result, WattsonError};
+pub use serial::{Mode, PsuHandle, PsuMonitor};

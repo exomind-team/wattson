@@ -8,7 +8,9 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
-use ratatui::widgets::{Axis, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table};
+use ratatui::widgets::{
+    Axis, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table,
+};
 
 use crate::config::Config;
 use crate::data::PsuSnapshot;
@@ -159,8 +161,8 @@ fn render_ui(
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // device info
-            Constraint::Length(9),  // middle section (power + DC)
+            Constraint::Length(3), // device info
+            Constraint::Length(9), // middle section (power + DC)
             Constraint::Min(8),    // chart
             Constraint::Length(6), // bottom section (thermal + cost)
             Constraint::Length(1), // status bar
@@ -365,16 +367,8 @@ fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
                 .borders(Borders::ALL)
                 .title(" Power Trend "),
         )
-        .x_axis(
-            Axis::default()
-                .labels(x_labels)
-                .bounds([0.0, x_len]),
-        )
-        .y_axis(
-            Axis::default()
-                .labels(y_labels)
-                .bounds([0.0, max_y]),
-        );
+        .x_axis(Axis::default().labels(x_labels).bounds([0.0, x_len]))
+        .y_axis(Axis::default().labels(y_labels).bounds([0.0, max_y]));
 
     f.render_widget(chart, area);
 }

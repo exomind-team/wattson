@@ -2,3 +2,4 @@
 Cargo.lock
 *.log
 *.tsv
+wattson_history.json

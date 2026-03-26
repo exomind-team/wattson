@@ -207,6 +207,12 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
         let total_kwh = cost.total_wh / 1000.0;
         let total_cost = total_kwh * cost.price_per_kwh;
         let duration_s = cost.start_time.elapsed().as_secs_f64();
+        let duration_h = duration_s / 3600.0;
+        let session_avg_w = if duration_h > 0.0 {
+            cost.total_wh / duration_h
+        } else {
+            snap.power.ac_input_w
+        };
         let currency = cost.currency.clone();
         let price = cost.price_per_kwh;
 
@@ -220,7 +226,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                 price,
                 duration_s,
                 &history,
-                snap.power.ac_input_avg_w,
+                session_avg_w,
                 chart_scale,
                 tick_ms,
             );
@@ -296,7 +302,7 @@ fn render_ui(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[1]);
 
-    render_power_panel(f, snap, middle_chunks[0]);
+    render_power_panel(f, snap, ac_avg_w, middle_chunks[0]);
     render_dc_panel(f, snap, middle_chunks[1]);
 
     // Chart section
@@ -339,7 +345,7 @@ fn render_ui(
     f.render_widget(status, main_chunks[4]);
 }
 
-fn render_power_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
+fn render_power_panel(f: &mut Frame, snap: &PsuSnapshot, session_avg_w: f64, area: Rect) {
     let ac_color = if snap.power.ac_input_w > 500.0 {
         Color::Red
     } else if snap.power.ac_input_w > 200.0 {
@@ -356,7 +362,7 @@ fn render_power_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
                 Style::default().fg(ac_color).add_modifier(Modifier::BOLD),
             ),
         ]),
-        Line::from(format!("  AC Avg:    {:>7.1} W", snap.power.ac_input_avg_w)),
+        Line::from(format!("  AC Avg:    {:>7.1} W", session_avg_w)),
         Line::from(format!(
             "  DC Output: {:>7.1} W",
             snap.power.dc_output_est_w

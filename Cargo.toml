@@ -1,6 +1,6 @@
 [package]
 name = "wattson"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Universal digital PSU monitoring library — read real-time power consumption via serial protocols"
 authors = ["ExoMind Team"]

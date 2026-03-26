@@ -173,7 +173,7 @@ fn render_ui(
             Constraint::Length(3), // device info
             Constraint::Length(9), // middle section (power + DC)
             Constraint::Min(8),    // chart
-            Constraint::Length(7), // bottom section (thermal + cost)
+            Constraint::Length(9), // bottom section (thermal + cost)
             Constraint::Length(1), // status bar
         ])
         .split(area);
@@ -396,20 +396,17 @@ fn render_thermal_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
 
     let lines = vec![
         Line::from(vec![
-            Span::raw("  Main: "),
+            Span::raw("  Main:  "),
             Span::styled(
-                format!("{:.1}C", snap.thermal.temp_main_c),
+                format!("{:>5.1}", snap.thermal.temp_main_c),
                 Style::default().fg(temp_color(snap.thermal.temp_main_c)),
             ),
-            Span::raw(format!(
-                "  Air1: {:.1}C  Air2: {:.1}C",
-                snap.thermal.temp_air_c, snap.thermal.temp_air2_c
-            )),
+            Span::raw(" C"),
         ]),
-        Line::from(format!(
-            "  Fan: {} RPM (PWM: {})",
-            snap.fan.rpm, snap.fan.pwm
-        )),
+        Line::from(format!("  Air1:  {:>5.1} C", snap.thermal.temp_air_c)),
+        Line::from(format!("  Air2:  {:>5.1} C", snap.thermal.temp_air2_c)),
+        Line::from(format!("  Fan:   {:>5} RPM", snap.fan.rpm)),
+        Line::from(format!("  PWM:   {:>5}", snap.fan.pwm)),
     ];
 
     let block = Paragraph::new(lines).block(
@@ -441,25 +438,44 @@ fn render_cost_panel(
     let weekly_cost = daily_cost * 7.0;
     let monthly_cost = daily_cost * 30.0;
 
+    let est_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
     let lines = vec![
-        Line::from(format!(
-            "  {:.4} kWh | {:.4} {}",
-            total_kwh, total_cost, currency
-        )),
-        Line::from(format!(
-            "  {:.2} {}/kWh | {:02}:{:02}:{:02}",
-            price, currency, hours, minutes, secs
-        )),
+        Line::from(format!("  Used: {:>8.4} kWh", total_kwh)),
+        Line::from(format!("  Cost: {:>8.4} {}", total_cost, currency)),
+        Line::from(format!("  Rate: {:>8.2} {}/kWh", price, currency)),
+        Line::from(format!("  Time: {:>02}:{:02}:{:02}", hours, minutes, secs)),
         Line::from(vec![
-            Span::raw("  Est: "),
+            Span::raw("  /day: "),
+            Span::styled(
+                format!("{:>5.1} kWh {:>6.2} {}", daily_kwh, daily_cost, currency),
+                est_style,
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("  /wk:  "),
             Span::styled(
                 format!(
-                    "{:.1}kWh/d {:.1}{}/d {:.0}{}/w {:.0}{}/m",
-                    daily_kwh, daily_cost, currency, weekly_cost, currency, monthly_cost, currency
+                    "{:>5.0} kWh {:>6.1} {}",
+                    daily_kwh * 7.0,
+                    weekly_cost,
+                    currency
                 ),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                est_style,
+            ),
+        ]),
+        Line::from(vec![
+            Span::raw("  /mo:  "),
+            Span::styled(
+                format!(
+                    "{:>5.0} kWh {:>6.0} {}",
+                    daily_kwh * 30.0,
+                    monthly_cost,
+                    currency
+                ),
+                est_style,
             ),
         ]),
     ];

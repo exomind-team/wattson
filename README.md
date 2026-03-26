@@ -35,6 +35,16 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 
 <div align="center">
 
+<img src="docs/screenshots/native-gui-dark.png" alt="Wattson Native egui + wgpu Dashboard" width="720">
+
+*Native GUI dashboard: `egui` + `wgpu`, theme-aware, fast desktop rendering*
+
+</div>
+
+### Legacy TUI / 传统 TUI
+
+<div align="center">
+
 <img src="assets/demo_tui.png" alt="Wattson TUI Dashboard — DM-1000GD Real-time Monitoring" width="600">
 
 *TUI dashboard: power trend chart, DC rails, thermal & fan, cost tracking*
@@ -51,6 +61,8 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 
 ## ✨ Features / 功能特点
 
+- **🖼️ Native GUI dashboard (`egui` + `wgpu`)** — GPU-backed desktop UI with live charts, theme switching, and control-side settings
+  原生桌面界面（`egui` + `wgpu`）— GPU 渲染实时图表、主题切换和图形控制设置
 - **🔌 Real-time power monitoring** — AC input (EMA-smoothed), DC output, conversion efficiency
   实时功率监控 — AC 输入（EMA 平滑）、DC 输出、转换效率
 - **📈 TUI dashboard with live chart** — Dual-line power trend (AC red / DC cyan), auto-zoom Y-axis, Braille markers
@@ -60,11 +72,24 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 - **📊 Chart generation** — Power/efficiency/temperature curves as PNG
   图表生成 — 功率/效率/温度曲线
 - **🖥️ Three modes** — CLI (one-shot), TUI (dashboard), API (HTTP server)
-  三种模式 — 命令行、终端面板、HTTP API
+  三种传统模式仍保留 — 命令行、终端面板、HTTP API
+- **🌗 Theme support** — Light / Dark / System modes with persisted GUI settings
+  主题支持 — 浅色 / 深色 / 跟随系统，并持久化图形设置
 - **⚙️ Independent rate control** — TUI refresh (200ms–2s) and serial poll (200ms–5s) independently adjustable at runtime
   独立速率控制 — TUI 刷新率和串口发包率运行时独立可调
 - **🔄 Active query by default** — 300ms poll interval, 3.3× faster than vendor software (HiMOS)
   默认主动查询 — 300ms 轮询，比厂商软件快 3.3 倍
+
+### GUI Controls / 图形控制项
+
+| Control 控制 | Description 说明 |
+|--------------|------------------|
+| Theme 主题 | `System / Light / Dark` |
+| Chart Window 图表窗口 | 30–600 seconds |
+| UI Refresh 刷新率 | 16–1000 ms |
+| Serial Poll 轮询间隔 | 200–5000 ms |
+| Series 曲线显隐 | AC / DC independently toggleable |
+| Scale 缩放 | Auto / Zero Based |
 
 ### TUI Hotkeys / TUI 快捷键
 
@@ -127,6 +152,12 @@ wattson ports
 ### Usage / 使用
 
 ```bash
+# Default desktop launch (GUI-first)  默认启动原生 GUI
+wattson
+
+# Native GUI with deterministic demo data  用演示数据启动 GUI
+wattson gui --demo
+
 # One-shot read (JSON output)  一次读取
 wattson read
 
@@ -175,6 +206,18 @@ When running `wattson serve`:
 | `GET /api/device` | Device info 设备信息 |
 | `GET /api/cost` | Electricity cost 电费 |
 | `GET /health` | Health check 健康检查 |
+
+---
+
+## 🧪 Testing / 测试
+
+```bash
+# Full test suite  全量测试
+cargo test
+
+# GUI snapshot/e2e coverage  GUI 快照与端到端覆盖
+cargo test --test gui_e2e -- --nocapture
+```
 
 ---
 

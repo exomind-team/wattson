@@ -20,8 +20,11 @@ pub mod chart;
 pub mod config;
 pub mod data;
 pub mod error;
+pub mod gui;
+pub mod gui_settings;
 pub mod history;
 pub mod protocol;
+pub mod runtime;
 pub mod serial;
 pub mod tui;
 

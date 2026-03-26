@@ -49,7 +49,7 @@ fn main() {
         }
 
         // Re-send query periodically
-        if start.elapsed().as_secs() % 5 == 0 && pkt_count > 0 {
+        if start.elapsed().as_secs().is_multiple_of(5) && pkt_count > 0 {
             let _ = serial.write_all(&query_cmd);
         }
     }

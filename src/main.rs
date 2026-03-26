@@ -15,7 +15,7 @@ use wattson::serial::{Mode, PsuMonitor};
 )]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -38,6 +38,12 @@ enum Commands {
         /// Refresh interval in milliseconds
         #[arg(long, default_value_t = 200)]
         refresh: u64,
+    },
+    /// Launch native GUI dashboard (egui + wgpu 原生界面)
+    Gui {
+        /// Use deterministic demo data (演示数据)
+        #[arg(long, default_value_t = false)]
+        demo: bool,
     },
     /// Start HTTP API server
     Serve {
@@ -104,11 +110,12 @@ fn main() {
     let cli = Cli::parse();
     let mut config = Config::load();
 
-    match cli.command {
+    match cli.command.unwrap_or(Commands::Gui { demo: false }) {
         Commands::Read { duration } => cmd_read(&config, duration),
         Commands::Watch => cmd_watch(&config),
         Commands::Config { action } => cmd_config(&mut config, action),
         Commands::Tui { refresh } => cmd_tui(&config, refresh),
+        Commands::Gui { demo } => cmd_gui(&config, demo),
         Commands::Serve { port } => cmd_serve(&mut config, port),
         Commands::Chart {
             last,
@@ -234,6 +241,26 @@ fn cmd_tui(config: &Config, refresh: u64) {
     }
 
     handle.stop();
+}
+
+fn cmd_gui(config: &Config, demo: bool) {
+    let handle = if demo {
+        None
+    } else {
+        let monitor = create_monitor(config);
+        match monitor.start() {
+            Ok(handle) => Some(handle),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    };
+
+    if let Err(e) = wattson::gui::run(config.clone(), handle, demo) {
+        eprintln!("GUI error: {}", e);
+        std::process::exit(1);
+    }
 }
 
 fn cmd_serve(config: &mut Config, port_override: Option<u16>) {
@@ -420,5 +447,37 @@ fn cmd_ports() {
             eprintln!("Error listing ports: {}", e);
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_args_keeps_none_so_main_can_default_to_gui() {
+        let cli = Cli::try_parse_from(["wattson"]).expect("parse default launch");
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn legacy_tui_command_still_parses() {
+        let cli = Cli::try_parse_from(["wattson", "tui", "--refresh", "450"]).expect("parse tui");
+        assert!(matches!(cli.command, Some(Commands::Tui { refresh: 450 })));
+    }
+
+    #[test]
+    fn legacy_read_command_still_parses() {
+        let cli = Cli::try_parse_from(["wattson", "read", "--duration", "60"]).expect("parse read");
+        assert!(matches!(cli.command, Some(Commands::Read { duration: 60 })));
+    }
+
+    #[test]
+    fn legacy_serve_command_still_parses() {
+        let cli = Cli::try_parse_from(["wattson", "serve", "--port", "9000"]).expect("parse serve");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Serve { port: Some(9000) })
+        ));
     }
 }

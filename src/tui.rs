@@ -299,12 +299,22 @@ fn render_ui(
         bottom_chunks[1],
     );
 
-    // Status bar — show hotkeys and poll speed
+    // Status bar — show hotkeys, poll speed, and stale warning
+    let stale_warn = if snap.meta.data_age_s > 3.0 {
+        format!("  STALE {:.0}s", snap.meta.data_age_s)
+    } else {
+        String::new()
+    };
     let status_text = format!(
-        " q:quit  z:scale  +/-:speed({}ms)  Age:{:.0}s",
-        snap.meta.poll_ms, snap.meta.data_age_s,
+        " q:quit  z:scale  +/-:speed({}ms){}",
+        snap.meta.poll_ms, stale_warn,
     );
-    let status = Paragraph::new(status_text).style(Style::default().fg(Color::DarkGray));
+    let status_style = if snap.meta.data_age_s > 3.0 {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let status = Paragraph::new(status_text).style(status_style);
     f.render_widget(status, main_chunks[4]);
 }
 

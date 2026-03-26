@@ -9,7 +9,7 @@ use crossterm::terminal::{
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::widgets::{
-    Axis, Block, Borders, Cell, Chart, Dataset, GraphType, LegendPosition, Paragraph, Row, Table,
+    Axis, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table,
 };
 
 use crate::config::Config;
@@ -362,9 +362,16 @@ fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
             .data(&ac_points),
     ];
 
-    let x_labels = vec![
-        Span::raw(format!("-{}s", CHART_HISTORY_LEN / 2)),
-        Span::raw("now"),
+    // X-axis labels: left=time, center=legend, right=now
+    let x_labels: Vec<Line> = vec![
+        Line::from(format!("-{}s", CHART_HISTORY_LEN / 2)),
+        Line::from(vec![
+            Span::styled("■", Style::default().fg(Color::Red)),
+            Span::raw(" AC  "),
+            Span::styled("■", Style::default().fg(Color::Cyan)),
+            Span::raw(" DC"),
+        ]),
+        Line::from("now"),
     ];
     let y_labels = vec![
         Span::raw("0W"),
@@ -380,8 +387,7 @@ fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
         )
         .x_axis(Axis::default().labels(x_labels).bounds([0.0, x_len]))
         .y_axis(Axis::default().labels(y_labels).bounds([0.0, max_y]))
-        .legend_position(Some(LegendPosition::BottomRight))
-        .hidden_legend_constraints((Constraint::Min(0), Constraint::Min(0)));
+        .legend_position(None);
 
     f.render_widget(chart, area);
 }

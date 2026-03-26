@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -7,11 +8,14 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
+use ratatui::widgets::{Axis, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table};
 
 use crate::config::Config;
 use crate::data::PsuSnapshot;
 use crate::serial::PsuHandle;
+
+/// Maximum number of samples in chart history
+const CHART_HISTORY_LEN: usize = 120;
 
 /// Cost accumulator for the TUI session
 struct CostState {
@@ -20,6 +24,57 @@ struct CostState {
     start_time: Instant,
     price_per_kwh: f64,
     currency: String,
+}
+
+/// Time-series data for charts
+struct ChartHistory {
+    ac_power: VecDeque<f64>,
+    dc_power: VecDeque<f64>,
+    sample_count: u64,
+}
+
+impl ChartHistory {
+    fn new() -> Self {
+        Self {
+            ac_power: VecDeque::with_capacity(CHART_HISTORY_LEN + 1),
+            dc_power: VecDeque::with_capacity(CHART_HISTORY_LEN + 1),
+            sample_count: 0,
+        }
+    }
+
+    fn push(&mut self, ac: f64, dc: f64) {
+        self.ac_power.push_back(ac);
+        self.dc_power.push_back(dc);
+        if self.ac_power.len() > CHART_HISTORY_LEN {
+            self.ac_power.pop_front();
+        }
+        if self.dc_power.len() > CHART_HISTORY_LEN {
+            self.dc_power.pop_front();
+        }
+        self.sample_count += 1;
+    }
+
+    fn ac_data_points(&self) -> Vec<(f64, f64)> {
+        self.ac_power
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (i as f64, v))
+            .collect()
+    }
+
+    fn dc_data_points(&self) -> Vec<(f64, f64)> {
+        self.dc_power
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (i as f64, v))
+            .collect()
+    }
+
+    fn max_power(&self) -> f64 {
+        let ac_max = self.ac_power.iter().cloned().fold(0.0_f64, f64::max);
+        let dc_max = self.dc_power.iter().cloned().fold(0.0_f64, f64::max);
+        ac_max.max(dc_max).max(50.0) // minimum 50W scale
+    }
 }
 
 /// Run the TUI dashboard
@@ -38,6 +93,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
         currency: config.cost.currency.clone(),
     };
 
+    let mut history = ChartHistory::new();
     let tick_rate = Duration::from_millis(refresh_ms);
     let mut last_tick = Instant::now();
 
@@ -49,6 +105,9 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
         cost.total_wh += snap.power.ac_input_w * elapsed_h;
         cost.last_sample = Instant::now();
 
+        // Push to chart history
+        history.push(snap.power.ac_input_w, snap.power.dc_output_est_w);
+
         let total_kwh = cost.total_wh / 1000.0;
         let total_cost = total_kwh * cost.price_per_kwh;
         let duration_s = cost.start_time.elapsed().as_secs_f64();
@@ -57,7 +116,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
 
         terminal.draw(|f| {
             render_ui(
-                f, &snap, total_kwh, total_cost, &currency, price, duration_s,
+                f, &snap, total_kwh, total_cost, &currency, price, duration_s, &history,
             );
         })?;
 
@@ -83,6 +142,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_ui(
     f: &mut Frame,
     snap: &PsuSnapshot,
@@ -91,16 +151,18 @@ fn render_ui(
     currency: &str,
     price: f64,
     duration_s: f64,
+    history: &ChartHistory,
 ) {
     let area = f.area();
 
-    // Main layout: device info | middle panels | bottom panels | status bar
+    // Main layout: device info | middle panels | chart | bottom panels | status bar
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // device info
-            Constraint::Min(10),   // middle section
-            Constraint::Length(7), // bottom section
+            Constraint::Length(3),  // device info
+            Constraint::Length(9),  // middle section (power + DC)
+            Constraint::Min(8),    // chart
+            Constraint::Length(6), // bottom section (thermal + cost)
             Constraint::Length(1), // status bar
         ])
         .split(area);
@@ -144,11 +206,14 @@ fn render_ui(
     render_power_panel(f, snap, middle_chunks[0]);
     render_dc_panel(f, snap, middle_chunks[1]);
 
+    // Chart section
+    render_power_chart(f, history, main_chunks[2]);
+
     // Bottom section: thermal+fan (left) + cost (right)
     let bottom_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(main_chunks[2]);
+        .split(main_chunks[3]);
 
     render_thermal_panel(f, snap, bottom_chunks[0]);
     render_cost_panel(
@@ -163,11 +228,11 @@ fn render_ui(
 
     // Status bar
     let status_text = format!(
-        " Packets: {} | Errors: {} | Age: {:.1}s | Press 'q' to exit",
-        snap.meta.packet_count, snap.meta.error_count, snap.meta.data_age_s,
+        " Packets: {} | Errors: {} | Age: {:.1}s | Samples: {} | Press 'q' to exit",
+        snap.meta.packet_count, snap.meta.error_count, snap.meta.data_age_s, history.sample_count,
     );
     let status = Paragraph::new(status_text).style(Style::default().fg(Color::DarkGray));
-    f.render_widget(status, main_chunks[3]);
+    f.render_widget(status, main_chunks[4]);
 }
 
 fn render_power_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
@@ -193,9 +258,10 @@ fn render_power_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
             snap.power.dc_output_est_w
         )),
         Line::from(format!("  Efficiency:{:>6.1} %", snap.power.efficiency_pct)),
-        Line::from(""),
-        Line::from(format!("  AC Voltage:{:>6.1} V", snap.ac.voltage_v)),
-        Line::from(format!("  AC Freq:   {:>6.1} Hz", snap.ac.frequency_hz)),
+        Line::from(format!(
+            "  AC: {:>5.1}V {:>4.1}Hz",
+            snap.ac.voltage_v, snap.ac.frequency_hz
+        )),
     ];
 
     let block =
@@ -262,6 +328,57 @@ fn render_dc_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
     f.render_widget(table, area);
 }
 
+fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
+    let ac_points = history.ac_data_points();
+    let dc_points = history.dc_data_points();
+    let max_y = history.max_power() * 1.15;
+    let x_len = CHART_HISTORY_LEN as f64;
+
+    let datasets = vec![
+        Dataset::default()
+            .name("AC Input")
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(Color::Red))
+            .data(&ac_points),
+        Dataset::default()
+            .name("DC Output")
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(Color::Cyan))
+            .data(&dc_points),
+    ];
+
+    let x_labels = vec![
+        Span::raw(format!("-{}s", CHART_HISTORY_LEN / 2)),
+        Span::raw("now"),
+    ];
+    let y_labels = vec![
+        Span::raw("0W"),
+        Span::raw(format!("{}W", max_y as u32 / 2)),
+        Span::raw(format!("{}W", max_y as u32)),
+    ];
+
+    let chart = Chart::new(datasets)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Power Trend "),
+        )
+        .x_axis(
+            Axis::default()
+                .labels(x_labels)
+                .bounds([0.0, x_len]),
+        )
+        .y_axis(
+            Axis::default()
+                .labels(y_labels)
+                .bounds([0.0, max_y]),
+        );
+
+    f.render_widget(chart, area);
+}
+
 fn render_thermal_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
     let temp_color = |t: f64| -> Color {
         if t > 60.0 {
@@ -275,16 +392,18 @@ fn render_thermal_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
 
     let lines = vec![
         Line::from(vec![
-            Span::raw("  Main:  "),
+            Span::raw("  Main: "),
             Span::styled(
-                format!("{:.1} C", snap.thermal.temp_main_c),
+                format!("{:.1}C", snap.thermal.temp_main_c),
                 Style::default().fg(temp_color(snap.thermal.temp_main_c)),
             ),
+            Span::raw(format!(
+                "  Air1: {:.1}C  Air2: {:.1}C",
+                snap.thermal.temp_air_c, snap.thermal.temp_air2_c
+            )),
         ]),
-        Line::from(format!("  Air1:  {:.1} C", snap.thermal.temp_air_c)),
-        Line::from(format!("  Air2:  {:.1} C", snap.thermal.temp_air2_c)),
         Line::from(format!(
-            "  Fan:   {} RPM (PWM: {})",
+            "  Fan: {} RPM (PWM: {})",
             snap.fan.rpm, snap.fan.pwm
         )),
     ];
@@ -311,12 +430,13 @@ fn render_cost_panel(
     let secs = (duration_s % 60.0) as u64;
 
     let lines = vec![
-        Line::from(format!("  Energy:   {:.4} kWh", total_kwh)),
-        Line::from(format!("  Cost:     {:.4} {}", total_cost, currency)),
-        Line::from(format!("  Rate:     {:.2} {}/kWh", price, currency)),
         Line::from(format!(
-            "  Duration: {:02}:{:02}:{:02}",
-            hours, minutes, secs
+            "  {:.4} kWh | {:.4} {}",
+            total_kwh, total_cost, currency
+        )),
+        Line::from(format!(
+            "  {:.2} {}/kWh | {:02}:{:02}:{:02}",
+            price, currency, hours, minutes, secs
         )),
     ];
 

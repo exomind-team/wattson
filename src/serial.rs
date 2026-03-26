@@ -344,7 +344,15 @@ fn process_payload(payload: &[u8], profile: &DeviceProfile, state: &SharedState)
         }
         PacketType::DeviceModel => {
             if let Some(model) = protocol::parse_model(payload) {
+                log::info!("Device model: {}", model);
                 s.snapshot.device.model = model;
+            }
+            // 0x03 packet also contains serial number — extract if we don't have one yet
+            if s.snapshot.device.serial.is_empty() {
+                if let Some(serial) = protocol::parse_serial_from_model_packet(payload) {
+                    log::info!("Serial (from 0x03): {}", serial);
+                    s.snapshot.device.serial = serial;
+                }
             }
         }
         PacketType::SerialNumber => {

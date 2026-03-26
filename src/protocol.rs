@@ -152,19 +152,28 @@ pub fn parse_extended(payload: &[u8], profile: &DeviceProfile) -> Option<Extende
     Some(result)
 }
 
-/// Parse 0x03 device model string
+/// Parse 0x03 combined device info packet.
+///
+/// The 0x03 packet is a combined frame containing model, serial, and manufacturer:
+/// `[0x03][model_ascii...][0x20 0x0a]["Sn"][serial_bytes][0x0a]["G"][manufacturer...]`
+///
+/// Returns (model, serial_hex, manufacturer) where available.
 pub fn parse_model(payload: &[u8]) -> Option<String> {
     if payload.is_empty() || payload[0] != 0x03 {
         return None;
     }
-    let text = String::from_utf8_lossy(&payload[1..])
-        .trim_matches('\0')
+    // Extract model: take ASCII printable chars until first control char or non-printable
+    let model: String = payload[1..]
+        .iter()
+        .take_while(|&&b| (0x20..0x7F).contains(&b)) // printable ASCII only
+        .map(|&b| b as char)
+        .collect::<String>()
         .trim()
         .to_string();
-    if text.is_empty() {
+    if model.is_empty() {
         None
     } else {
-        Some(text)
+        Some(model)
     }
 }
 
@@ -178,10 +187,42 @@ pub fn parse_serial(payload: &[u8]) -> Option<String> {
         .trim()
         .to_string();
     if text.is_empty() {
+        // Try extracting serial from 0x03 combined packet as fallback
         None
     } else {
         Some(text)
     }
+}
+
+/// Try to extract serial number from a 0x03 combined packet.
+/// Looks for "Sn" marker followed by binary serial data.
+pub fn parse_serial_from_model_packet(payload: &[u8]) -> Option<String> {
+    if payload.is_empty() || payload[0] != 0x03 {
+        return None;
+    }
+    // Find "Sn" marker in payload
+    for i in 1..payload.len().saturating_sub(4) {
+        if payload[i] == b'S' && payload[i + 1] == b'n' {
+            // Serial bytes follow "Sn" until next 0x0a or end
+            let serial_start = i + 2;
+            let serial_end = payload[serial_start..]
+                .iter()
+                .position(|&b| b == 0x0a)
+                .map(|p| serial_start + p)
+                .unwrap_or(payload.len());
+            let serial_bytes = &payload[serial_start..serial_end];
+            if !serial_bytes.is_empty() {
+                return Some(
+                    serial_bytes
+                        .iter()
+                        .map(|b| format!("{:02X}", b))
+                        .collect::<Vec<_>>()
+                        .join(""),
+                );
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -203,5 +244,19 @@ mod tests {
         let payload = [0x03, b'D', b'M', b'-', b'1', b'0', b'0', b'0', b'G', 0x00];
         let model = parse_model(&payload);
         assert_eq!(model, Some("DM-1000G".to_string()));
+    }
+
+    #[test]
+    fn test_parse_model_combined_packet() {
+        // Real 0x03 packet from DM-1000GD: model + serial + manufacturer
+        let payload = [
+            0x03, 0x44, 0x4d, 0x2d, 0x31, 0x30, 0x30, 0x30, 0x47, 0x44, 0x20, 0x0a, 0x53, 0x6e,
+            0xf0, 0x03, 0xe8, 0x0a, 0x47, 0x73, 0x65, 0x67, 0x6f, 0x74,
+        ];
+        let model = parse_model(&payload);
+        assert_eq!(model, Some("DM-1000GD".to_string()));
+
+        let serial = parse_serial_from_model_packet(&payload);
+        assert_eq!(serial, Some("F003E8".to_string()));
     }
 }

@@ -51,18 +51,45 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 
 ## ✨ Features / 功能特点
 
-- **🔌 Real-time power monitoring** — AC input, DC output, conversion efficiency
-  实时功率监控 — AC 输入、DC 输出、转换效率
+- **🔌 Real-time power monitoring** — AC input (EMA-smoothed), DC output, conversion efficiency
+  实时功率监控 — AC 输入（EMA 平滑）、DC 输出、转换效率
+- **📈 TUI dashboard with live chart** — Dual-line power trend (AC red / DC cyan), auto-zoom Y-axis, Braille markers
+  TUI 面板 + 实时图表 — 双线功率趋势、自动缩放 Y 轴
+- **💰 Electricity cost tracking** — Session-wide average power → day/week/month projections. Energy accumulated via numerical integration (left Riemann sum, f64 precision — safe for years of continuous operation)
+  电费追踪 — 全程平均功率推算日/周/月费用，数值积分累加能量（f64 精度，可连续运行数年无溢出）
 - **📊 Chart generation** — Power/efficiency/temperature curves as PNG
   图表生成 — 功率/效率/温度曲线
-- **💰 Electricity cost tracking** — Configurable price per kWh
-  电费追踪 — 可配置电价
 - **🖥️ Three modes** — CLI (one-shot), TUI (dashboard), API (HTTP server)
   三种模式 — 命令行、终端面板、HTTP API
-- **⚙️ Config file** — TOML configuration with CLI management
-  配置文件 — TOML 格式，CLI 可管理
-- **🔄 Passive & Active** — Listen for broadcasts or actively query the PSU
-  被动监听 & 主动查询两种通信模式
+- **⚙️ Independent rate control** — TUI refresh (200ms–2s) and serial poll (200ms–5s) independently adjustable at runtime
+  独立速率控制 — TUI 刷新率和串口发包率运行时独立可调
+- **🔄 Active query by default** — 300ms poll interval, 3.3× faster than vendor software (HiMOS)
+  默认主动查询 — 300ms 轮询，比厂商软件快 3.3 倍
+
+### TUI Hotkeys / TUI 快捷键
+
+| Key 按键 | Action 功能 |
+|----------|------------|
+| `q` | Quit 退出 |
+| `z` | Toggle chart scale: auto-zoom / zero-based 切换图表缩放模式 |
+| `+` / `-` | Adjust TUI refresh rate (200ms–2000ms) 调节画面刷新率 |
+| `]` / `[` | Adjust serial poll rate (200ms–5000ms) 调节串口发包率 |
+
+### Algorithm / 算法说明
+
+```
+AC Input    = EMA-smoothed instantaneous power (α=0.5)
+              EMA 平滑后的瞬时功率
+
+AC Average  = total_wh / duration_h  (session-wide, stabilizes over time)
+              全程累计能量 ÷ 运行时长 = 真实平均功率
+
+Energy (Wh) = Σ P(tᵢ) × Δtᵢ  (numerical integration, f64 accumulator)
+              数值积分，每个 tick 累加 功率×时间间隔
+
+Cost        = energy_kwh × price_per_kwh
+Daily est.  = session_avg_w × 24h / 1000 × price
+```
 
 ---
 

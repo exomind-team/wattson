@@ -1,7 +1,7 @@
 [serial]
 port = "COM4"
 baud = 115200
-mode = "passive"
+mode = "active"
 
 [device]
 profile = "segotep_dm"

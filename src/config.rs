@@ -64,7 +64,7 @@ fn default_baud() -> u32 {
     115200
 }
 fn default_mode() -> String {
-    "passive".to_string()
+    "active".to_string()
 }
 fn default_profile() -> String {
     "segotep_dm".to_string()

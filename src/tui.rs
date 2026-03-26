@@ -346,19 +346,20 @@ fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
     let max_y = history.max_power() * 1.15;
     let x_len = CHART_HISTORY_LEN as f64;
 
+    // DC drawn first (underneath), AC drawn last (on top, more important)
     let datasets = vec![
-        Dataset::default()
-            .name("AC Input")
-            .marker(symbols::Marker::Braille)
-            .graph_type(GraphType::Line)
-            .style(Style::default().fg(Color::Red))
-            .data(&ac_points),
         Dataset::default()
             .name("DC Output")
             .marker(symbols::Marker::Braille)
             .graph_type(GraphType::Line)
             .style(Style::default().fg(Color::Cyan))
             .data(&dc_points),
+        Dataset::default()
+            .name("AC Input")
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(Color::Red))
+            .data(&ac_points),
     ];
 
     let x_labels = vec![
@@ -379,7 +380,7 @@ fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
         )
         .x_axis(Axis::default().labels(x_labels).bounds([0.0, x_len]))
         .y_axis(Axis::default().labels(y_labels).bounds([0.0, max_y]))
-        .legend_position(Some(LegendPosition::TopRight))
+        .legend_position(Some(LegendPosition::BottomRight))
         .hidden_legend_constraints((Constraint::Min(0), Constraint::Min(0)));
 
     f.render_widget(chart, area);

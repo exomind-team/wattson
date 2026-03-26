@@ -36,7 +36,7 @@ enum Commands {
     /// Launch interactive TUI dashboard
     Tui {
         /// Refresh interval in milliseconds
-        #[arg(long, default_value_t = 500)]
+        #[arg(long, default_value_t = 200)]
         refresh: u64,
     },
     /// Start HTTP API server

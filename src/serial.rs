@@ -104,7 +104,7 @@ impl PsuMonitor {
             baud: 115200,
             mode,
             profile: DeviceProfile::default(),
-            poll_interval: Duration::from_millis(500),
+            poll_interval: Duration::from_millis(400),
         }
     }
 

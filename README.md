@@ -20,7 +20,7 @@
 
 <div align="center">
 
-![Wattson TUI Dashboard — DM-1000GD Real-time Monitoring](assets/demo_tui.png)
+<img src="assets/demo_tui.png" alt="Wattson TUI Dashboard — DM-1000GD Real-time Monitoring" width="600">
 
 *TUI dashboard: power trend chart, DC rails, thermal & fan, cost tracking*
 

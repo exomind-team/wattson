@@ -213,8 +213,14 @@ fn read_frames(
             Err(e) => return Err(WattsonError::Io(e)),
         }
 
-        // Active mode: periodic query
-        if mode == Mode::Active && last_query.elapsed() > poll_interval {
+        // Periodic query: active mode uses poll_interval, passive mode uses 2s
+        // Sending QUERY_CMD in passive mode too ensures fresh 0x04 (AC power) data
+        let query_interval = if mode == Mode::Active {
+            poll_interval
+        } else {
+            Duration::from_secs(2)
+        };
+        if last_query.elapsed() > query_interval {
             let _ = serial.write(&QUERY_CMD);
             last_query = Instant::now();
         }

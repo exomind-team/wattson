@@ -9,7 +9,7 @@ use crossterm::terminal::{
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::widgets::{
-    Axis, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table,
+    Axis, Block, Borders, Cell, Chart, Dataset, GraphType, LegendPosition, Paragraph, Row, Table,
 };
 
 use crate::config::Config;
@@ -378,7 +378,9 @@ fn render_power_chart(f: &mut Frame, history: &ChartHistory, area: Rect) {
                 .title(" Power Trend "),
         )
         .x_axis(Axis::default().labels(x_labels).bounds([0.0, x_len]))
-        .y_axis(Axis::default().labels(y_labels).bounds([0.0, max_y]));
+        .y_axis(Axis::default().labels(y_labels).bounds([0.0, max_y]))
+        .legend_position(Some(LegendPosition::TopRight))
+        .hidden_legend_constraints((Constraint::Min(0), Constraint::Min(0)));
 
     f.render_widget(chart, area);
 }

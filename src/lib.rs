@@ -20,6 +20,7 @@ pub mod chart;
 pub mod config;
 pub mod data;
 pub mod error;
+pub mod history;
 pub mod protocol;
 pub mod serial;
 pub mod tui;

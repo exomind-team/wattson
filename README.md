@@ -16,6 +16,21 @@
 
 ---
 
+## 💡 Why Wattson? / 为什么做这个？
+
+Digital PSUs (数字电源) expose real-time telemetry over USB — voltages, currents, temperatures, fan speed — but the vendor software (e.g., HiMOS) typically only refreshes once every 1–2 seconds, with no data export or cost tracking. For anyone who wants to:
+
+- **Monitor electricity costs** — know exactly how much it costs to run your PC per day/week/month
+- **Integrate power data** into research workflows, home automation, or dashboards
+- **Push the sampling rate** — Wattson queries at 300ms (3.3 Hz), 3–6× faster than vendor tools
+- **Understand the protocol** — reverse-engineer and document the binary serial protocol for future hardware
+
+We built Wattson. It started with a Segotep DM-1000G and curiosity about what's actually on the wire. The protocol turned out to be straightforward (header + big/little-endian uint16 arrays + checksum), and the result is a general-purpose library that could support any digital PSU with similar serial protocols.
+
+数字电源通过 USB 暴露实时遥测数据，但厂商软件（如 HiMOS）刷新慢（1–2秒）、不能导出数据、没有电费统计。我们想知道开一天电脑到底花多少钱，想把功率数据接入自己的研究流程，想把采样率推到极限。于是从逆向鑫谷 DM-1000G 的串口协议开始，写了这个通用数字电源监控库。
+
+---
+
 ## 📊 Real-time Monitoring / 实时监控
 
 <div align="center">

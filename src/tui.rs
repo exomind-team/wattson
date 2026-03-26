@@ -118,7 +118,15 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
 
         terminal.draw(|f| {
             render_ui(
-                f, &snap, total_kwh, total_cost, &currency, price, duration_s, &history,
+                f,
+                &snap,
+                total_kwh,
+                total_cost,
+                &currency,
+                price,
+                duration_s,
+                &history,
+                snap.power.ac_input_avg_w,
             );
         })?;
 
@@ -154,6 +162,7 @@ fn render_ui(
     price: f64,
     duration_s: f64,
     history: &ChartHistory,
+    ac_avg_w: f64,
 ) {
     let area = f.area();
 
@@ -164,7 +173,7 @@ fn render_ui(
             Constraint::Length(3), // device info
             Constraint::Length(9), // middle section (power + DC)
             Constraint::Min(8),    // chart
-            Constraint::Length(6), // bottom section (thermal + cost)
+            Constraint::Length(7), // bottom section (thermal + cost)
             Constraint::Length(1), // status bar
         ])
         .split(area);
@@ -225,6 +234,7 @@ fn render_ui(
         currency,
         price,
         duration_s,
+        ac_avg_w,
         bottom_chunks[1],
     );
 
@@ -410,6 +420,7 @@ fn render_thermal_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
     f.render_widget(block, area);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_cost_panel(
     f: &mut Frame,
     total_kwh: f64,
@@ -417,11 +428,16 @@ fn render_cost_panel(
     currency: &str,
     price: f64,
     duration_s: f64,
+    ac_avg_w: f64,
     area: Rect,
 ) {
     let hours = (duration_s / 3600.0) as u64;
     let minutes = ((duration_s % 3600.0) / 60.0) as u64;
     let secs = (duration_s % 60.0) as u64;
+
+    // Daily projection based on current average power
+    let daily_kwh = ac_avg_w * 24.0 / 1000.0;
+    let daily_cost = daily_kwh * price;
 
     let lines = vec![
         Line::from(format!(
@@ -432,6 +448,15 @@ fn render_cost_panel(
             "  {:.2} {}/kWh | {:02}:{:02}:{:02}",
             price, currency, hours, minutes, secs
         )),
+        Line::from(vec![
+            Span::raw("  24h est: "),
+            Span::styled(
+                format!("{:.2} kWh | {:.2} {}", daily_kwh, daily_cost, currency),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
     ];
 
     let block = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Cost "));

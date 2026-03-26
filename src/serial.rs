@@ -28,10 +28,9 @@ struct PsuState {
     last_update: Option<Instant>,
 }
 
-/// EMA smoothing factor (0.0–1.0, lower = smoother)
-const AC_EMA_ALPHA: f64 = 0.3;
-/// Spike rejection threshold: reject if delta > 25% of EMA
-const AC_SPIKE_THRESHOLD: f64 = 0.25;
+/// EMA smoothing factor (0.0–1.0, higher = tracks faster)
+/// 0.5 balances smoothing quantization noise while tracking real changes
+const AC_EMA_ALPHA: f64 = 0.5;
 
 impl PsuState {
     fn new() -> Self {
@@ -294,27 +293,11 @@ fn process_payload(payload: &[u8], profile: &DeviceProfile, state: &SharedState)
                 s.snapshot.thermal.temp_air2_c = data.temp_air2;
                 s.snapshot.fan.pwm = data.mode_byte;
 
-                // AC power spike filtering with EMA
+                // AC power EMA smoothing (removes quantization noise without lagging real changes)
                 let raw_ac = data.ac_power;
                 let filtered_ac = match s.ac_ema {
-                    Some(ema) if ema > 10.0 => {
-                        let delta_pct = ((raw_ac - ema) / ema).abs();
-                        if delta_pct > AC_SPIKE_THRESHOLD {
-                            // Spike detected: blend slowly toward the new value
-                            log::debug!(
-                                "AC power spike: raw={:.1}W, ema={:.1}W, delta={:.1}%  (mode_byte=0x{:02x})",
-                                raw_ac, ema, delta_pct * 100.0, data.mode_byte
-                            );
-                            ema + (raw_ac - ema) * AC_EMA_ALPHA * 0.3
-                        } else {
-                            // Normal: standard EMA update
-                            ema + (raw_ac - ema) * AC_EMA_ALPHA
-                        }
-                    }
-                    _ => {
-                        // First sample or very low power: accept raw value
-                        raw_ac
-                    }
+                    Some(ema) => ema + (raw_ac - ema) * AC_EMA_ALPHA,
+                    None => raw_ac,
                 };
                 s.ac_ema = Some(filtered_ac);
                 s.snapshot.power.ac_input_w = filtered_ac;

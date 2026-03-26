@@ -300,7 +300,7 @@ fn render_ui(
     render_dc_panel(f, snap, middle_chunks[1]);
 
     // Chart section
-    render_power_chart(f, history, chart_scale, main_chunks[2]);
+    render_power_chart(f, history, chart_scale, tick_ms, main_chunks[2]);
 
     // Bottom section: thermal+fan (left) + cost (right)
     let bottom_chunks = Layout::default()
@@ -432,7 +432,13 @@ fn render_dc_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
     f.render_widget(table, area);
 }
 
-fn render_power_chart(f: &mut Frame, history: &ChartHistory, scale: ChartScale, area: Rect) {
+fn render_power_chart(
+    f: &mut Frame,
+    history: &ChartHistory,
+    scale: ChartScale,
+    tick_ms: u64,
+    area: Rect,
+) {
     let ac_points = history.ac_data_points();
     let dc_points = history.dc_data_points();
     let max_y = history.max_power() * 1.15;
@@ -469,9 +475,10 @@ fn render_power_chart(f: &mut Frame, history: &ChartHistory, scale: ChartScale, 
             .data(&ac_points),
     ];
 
-    // X-axis labels: left=time, center=legend, right=now
+    // X-axis: real time span based on tick rate × buffer length
+    let total_secs = CHART_HISTORY_LEN as u64 * tick_ms / 1000;
     let x_labels: Vec<Line> = vec![
-        Line::from(format!("-{}s", CHART_HISTORY_LEN / 2)),
+        Line::from(format!("-{}s", total_secs)),
         Line::from(vec![
             Span::styled("■", Style::default().fg(Color::Red)),
             Span::raw(" AC  "),

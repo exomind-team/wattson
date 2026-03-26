@@ -207,7 +207,7 @@ fn reader_loop(
 
 fn read_frames(
     serial: &mut dyn SerialPort,
-    mode: Mode,
+    _mode: Mode,
     profile: &DeviceProfile,
     poll_ms: &Arc<Mutex<u64>>,
     state: &SharedState,
@@ -227,13 +227,8 @@ fn read_frames(
             Err(e) => return Err(WattsonError::Io(e)),
         }
 
-        // Periodic query: read dynamic poll interval from shared state
-        let current_poll = Duration::from_millis(*poll_ms.lock().unwrap());
-        let query_interval = if mode == Mode::Active {
-            current_poll
-        } else {
-            current_poll.max(Duration::from_secs(1)) // passive: at least 1s
-        };
+        // Periodic query: use dynamic poll interval from shared state
+        let query_interval = Duration::from_millis(*poll_ms.lock().unwrap());
         if last_query.elapsed() > query_interval {
             let _ = serial.write(&QUERY_CMD);
             last_query = Instant::now();

@@ -127,8 +127,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
 
     let mut history = ChartHistory::new();
     let mut chart_scale = ChartScale::Auto;
-    let mut tick_ms: u64 = refresh_ms.max(200); // minimum 200ms
-    handle.set_poll_ms(tick_ms);
+    let mut tick_ms: u64 = refresh_ms.max(200);
     let mut last_tick = Instant::now();
 
     loop {
@@ -156,13 +155,23 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                             KeyCode::Char('+') | KeyCode::Char('=') => {
                                 if tick_ms > 200 {
                                     tick_ms -= 100;
-                                    handle.set_poll_ms(tick_ms);
                                 }
                             }
                             KeyCode::Char('-') => {
                                 if tick_ms < 2000 {
                                     tick_ms += 100;
-                                    handle.set_poll_ms(tick_ms);
+                                }
+                            }
+                            KeyCode::Char(']') => {
+                                let ms = handle.poll_ms();
+                                if ms > 200 {
+                                    handle.set_poll_ms(ms - 100);
+                                }
+                            }
+                            KeyCode::Char('[') => {
+                                let ms = handle.poll_ms();
+                                if ms < 5000 {
+                                    handle.set_poll_ms(ms + 100);
                                 }
                             }
                             _ => {}
@@ -213,6 +222,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                 &history,
                 snap.power.ac_input_avg_w,
                 chart_scale,
+                tick_ms,
             );
         })?;
     }
@@ -234,6 +244,7 @@ fn render_ui(
     history: &ChartHistory,
     ac_avg_w: f64,
     chart_scale: ChartScale,
+    tick_ms: u64,
 ) {
     let area = f.area();
 
@@ -316,7 +327,7 @@ fn render_ui(
         String::new()
     };
     let status_text = format!(
-        " q:quit  z:scale  +/-:speed({}ms){}",
+        " q:quit z:scale +/-:fps({tick_ms}ms) [/]:poll({}ms){}",
         snap.meta.poll_ms, stale_warn,
     );
     let status_style = if snap.meta.data_age_s > 3.0 {

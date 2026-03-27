@@ -172,9 +172,9 @@ impl GuiApp {
 
         app.set_poll_interval_ms(app.settings.poll_interval_ms);
         if demo {
-            let chart_window_samples =
-                (app.settings.chart_window_s.saturating_mul(1000) / app.settings.poll_interval_ms)
-                    + 1;
+            let chart_window_samples = (app.settings.chart_window_s.saturating_mul(1000)
+                / app.settings.poll_interval_ms)
+                + 1;
             app.seed_demo_history(chart_window_samples.max(180));
         } else {
             app.ingest_sample(true);

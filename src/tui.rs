@@ -300,7 +300,13 @@ fn render_ui(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[1]);
 
-    render_power_panel(f, snap, session_ac_avg_w, session_dc_avg_w, middle_chunks[0]);
+    render_power_panel(
+        f,
+        snap,
+        session_ac_avg_w,
+        session_dc_avg_w,
+        middle_chunks[0],
+    );
     render_dc_panel(f, snap, middle_chunks[1]);
 
     // Chart section

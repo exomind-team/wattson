@@ -1,6 +1,6 @@
 [package]
 name = "wattson"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Universal digital PSU monitoring library — read real-time power consumption via serial protocols"
 authors = ["ExoMind Team"]
@@ -9,6 +9,16 @@ repository = "https://github.com/exomind-team/wattson"
 readme = "README.md"
 keywords = ["psu", "power-supply", "serial", "monitoring", "energy"]
 categories = ["hardware-support", "embedded"]
+exclude = [
+    "logs/**",
+    "tools/**",
+    "target/**",
+    "wattson.toml",
+    "wattson_history.json",
+    "wattson_gui.json",
+    "**/tests/snapshots/**/*.diff.png",
+    "**/tests/snapshots/**/*.new.png",
+]
 
 [dependencies]
 serialport = "4"

@@ -4,5 +4,7 @@ Cargo.lock
 *.tsv
 wattson_history.json
 wattson_gui.json
+logs/
+tools/
 **/tests/snapshots/**/*.diff.png
 **/tests/snapshots/**/*.new.png

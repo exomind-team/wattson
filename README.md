@@ -63,6 +63,8 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 
 - **🖼️ Native GUI dashboard (`egui` + `wgpu`)** — GPU-backed desktop UI with live charts, theme switching, and control-side settings
   原生桌面界面（`egui` + `wgpu`）— GPU 渲染实时图表、主题切换和图形控制设置
+- **🌀 Fan write control (`0x13` / `0x1B`)** — set fan mode, flat PWM, or custom curve through the same background serial session
+  风扇写入控制（`0x13` / `0x1B`）— 通过同一个后台串口会话设置风扇模式、固定占空比或自定义曲线
 - **🔌 Real-time power monitoring** — AC input (EMA-smoothed), DC output, conversion efficiency
   实时功率监控 — AC 输入（EMA 平滑）、DC 输出、转换效率
 - **📈 TUI dashboard with live chart** — Dual-line power trend (AC red / DC cyan), auto-zoom Y-axis, Braille markers
@@ -90,12 +92,19 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 | Serial Poll 轮询间隔 | 200–5000 ms |
 | Series 曲线显隐 | AC / DC independently toggleable |
 | Scale 缩放 | Auto / Zero Based |
+| Serial Visibility 序列号显示 | masked by default, optional full reveal 默认脱敏，可手动显示完整值 |
+| Fan Mode 风扇模式 | `Auto / Silent / Performance / Custom / Clean` |
+| Manual PWM 固定占空比 | 0–100%, sends a flat custom curve |
+| Custom Curve 自定义曲线 | 3 editable control points + fixed `0C/100C` endpoints |
 
 ### TUI Hotkeys / TUI 快捷键
 
 | Key 按键 | Action 功能 |
 |----------|------------|
 | `q` | Quit 退出 |
+| `a` / `s` / `p` / `u` / `c` | Set fan mode: auto / silent / performance / custom / clean 切换风扇模式 |
+| `h` / `l` | Decrease / increase manual PWM target by 5% 调整手动占空比目标 |
+| `m` | Apply current manual PWM target 应用当前手动占空比 |
 | `z` | Toggle chart scale: auto-zoom / zero-based 切换图表缩放模式 |
 | `+` / `-` | Adjust TUI refresh rate (200ms–2000ms) 调节画面刷新率 |
 | `]` / `[` | Adjust serial poll rate (200ms–5000ms) 调节串口发包率 |
@@ -173,6 +182,15 @@ wattson tui
 # HTTP API server  API 服务器
 wattson serve
 
+# Set manual fan PWM (flat custom curve)  设置固定风扇占空比
+wattson fan set 55
+
+# Set fan mode  设置风扇模式
+wattson fan mode custom
+
+# Apply a custom curve  应用自定义风扇曲线
+wattson fan curve "[[30,40],[50,55],[70,75]]"
+
 # Generate chart  生成图表
 wattson chart --last 60
 ```
@@ -205,7 +223,26 @@ When running `wattson serve`:
 | `GET /api/temperature` | Temperature sensors 温度 |
 | `GET /api/device` | Device info 设备信息 |
 | `GET /api/cost` | Electricity cost 电费 |
+| `POST /api/fan/speed` | Set flat PWM / 设置固定占空比 |
+| `POST /api/fan/curve` | Apply custom curve / 应用自定义曲线 |
+| `POST /api/fan/mode` | Set fan mode / 设置风扇模式 |
 | `GET /health` | Health check 健康检查 |
+
+Example requests / 请求示例：
+
+```bash
+curl -X POST http://127.0.0.1:8066/api/fan/speed \
+  -H "Content-Type: application/json" \
+  -d '{"pwm":55}'
+
+curl -X POST http://127.0.0.1:8066/api/fan/mode \
+  -H "Content-Type: application/json" \
+  -d '{"mode":"custom"}'
+
+curl -X POST http://127.0.0.1:8066/api/fan/curve \
+  -H "Content-Type: application/json" \
+  -d '{"points":[[30,40],[50,55],[70,75]]}'
+```
 
 ---
 
@@ -253,7 +290,7 @@ port = 8066            # HTTP API port
 Wattson communicates with digital PSUs via USB serial (CH340/CH341 UART). The protocol uses a custom binary frame format:
 
 ```
-[0x55][0x7E][LEN][PAYLOAD...][CHECKSUM_HI][CHECKSUM_LO][0xAE]
+[0x55][0x7E][LEN][CMD][DATA...][CHECKSUM][0xAE]
 ```
 
 | Packet | Content | Byte Order |
@@ -262,6 +299,13 @@ Wattson communicates with digital PSUs via USB serial (CH340/CH341 UART). The pr
 | `0x03` | Device model string | ASCII |
 | `0x04` | Temperature, fan mode, AC power | Big-endian |
 | `0x05` | Serial number | ASCII |
+
+Write support currently covers:
+
+- `0x13` fan mode
+- `0x1B` custom fan curve with `CRC-8 (poly=0x07, init=0x00)`
+
+See [docs/protocol.md](docs/protocol.md) for reverse-engineering notes, frame samples, and current unknowns.
 
 ---
 

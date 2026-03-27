@@ -1,11 +1,259 @@
 use crate::data::DeviceProfile;
+use crate::error::{Result, WattsonError};
+use serde::{Deserialize, Serialize};
 
 /// Protocol constants
 const HEADER: [u8; 2] = [0x55, 0x7E];
-const _FOOTER: u8 = 0xAE;
+const FOOTER: u8 = 0xAE;
 
 /// Active query command (triggers PSU to start broadcasting)
 pub const QUERY_CMD: [u8; 6] = [0x55, 0x7E, 0x02, 0x04, 0x06, 0xAE];
+
+/// Fan mode / 风扇模式
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FanMode {
+    Auto,
+    Silent,
+    Performance,
+    Custom,
+    Clean,
+}
+
+impl FanMode {
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Auto => 0x00,
+            Self::Silent => 0x01,
+            Self::Performance => 0x02,
+            Self::Custom => 0x03,
+            Self::Clean => 0x04,
+        }
+    }
+
+    /// `0x13` mode-frame checksum bytes are taken from the vendor protocol table.
+    /// `0x13` 模式短帧的校验字节按厂商协议表字面值写入。
+    pub const fn frame_checksum(self) -> u8 {
+        match self {
+            Self::Auto => 0x17,
+            Self::Silent => 0x18,
+            Self::Performance => 0x19,
+            Self::Custom => 0x20,
+            Self::Clean => 0x21,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "auto / 自动",
+            Self::Silent => "silent / 静音",
+            Self::Performance => "performance / 超频",
+            Self::Custom => "custom / 自定义",
+            Self::Clean => "clean / 清灰",
+        }
+    }
+}
+
+impl std::fmt::Display for FanMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            Self::Auto => "auto",
+            Self::Silent => "silent",
+            Self::Performance => "performance",
+            Self::Custom => "custom",
+            Self::Clean => "clean",
+        };
+        f.write_str(text)
+    }
+}
+
+impl std::str::FromStr for FanMode {
+    type Err = WattsonError;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "silent" => Ok(Self::Silent),
+            "performance" | "perf" => Ok(Self::Performance),
+            "custom" => Ok(Self::Custom),
+            "clean" => Ok(Self::Clean),
+            _ => Err(WattsonError::Protocol {
+                message: format!("unknown fan mode: {value} / 未知风扇模式: {value}"),
+            }),
+        }
+    }
+}
+
+/// Build the active query frame / 构造主动查询帧
+pub fn build_query_frame() -> Vec<u8> {
+    QUERY_CMD.to_vec()
+}
+
+/// Build a fan mode frame / 构造风扇模式写入帧
+pub fn build_fan_mode_frame(mode: FanMode) -> Vec<u8> {
+    build_frame(0x13, &[0x00, mode.code()], mode.frame_checksum())
+}
+
+/// CRC-8 (poly `0x07`, init `0x00`) used by the vendor app for `0x1B`.
+/// `0x1B` 长帧使用标准 CRC-8（poly=`0x07`, init=`0x00`）。
+pub fn crc8(bytes: &[u8]) -> u8 {
+    let mut crc = 0u8;
+    for &byte in bytes {
+        crc ^= byte;
+        for _ in 0..8 {
+            crc = if crc & 0x80 != 0 {
+                (crc << 1) ^ 0x07
+            } else {
+                crc << 1
+            };
+        }
+    }
+    crc
+}
+
+/// Expand fan curve points into the 21-sample table used by command `0x1B`.
+/// 将风扇曲线点展开为 `0x1B` 需要的 21 个采样点（0C..100C，每 5C 一点）。
+pub fn expand_fan_curve_table(points: &[(u8, u8)]) -> Result<Vec<u8>> {
+    let normalized = normalize_fan_curve_points(points)?;
+    let samples = (0..=20)
+        .map(|index| interpolate_pwm((index * 5) as u8, &normalized))
+        .collect();
+    Ok(samples)
+}
+
+/// Build a custom curve frame / 构造自定义风扇曲线写入帧
+pub fn build_fan_curve_frame(points: &[(u8, u8)]) -> Result<Vec<u8>> {
+    let normalized = normalize_fan_curve_points(points)?;
+    let samples = expand_fan_curve_table(points)?;
+
+    let mut crc_input = Vec::with_capacity(29);
+    crc_input.push(0x1D);
+    crc_input.push(0x1B);
+    crc_input.extend(samples.iter().copied());
+    for &(temp, pwm) in &normalized[1..4] {
+        crc_input.push(temp);
+        crc_input.push(pwm);
+    }
+
+    let checksum = crc8(&crc_input);
+
+    let mut frame = build_frame(0x1B, &samples, checksum);
+    let insert_at = 4 + samples.len();
+    frame.splice(
+        insert_at..insert_at,
+        normalized[1..4]
+            .iter()
+            .flat_map(|(temp, pwm)| [*temp, *pwm]),
+    );
+    frame[2] = 0x1D;
+    Ok(frame)
+}
+
+fn build_frame(command: u8, payload: &[u8], checksum: u8) -> Vec<u8> {
+    let len = payload.len() + 2;
+    let mut frame = Vec::with_capacity(2 + 1 + len + 1);
+    frame.extend_from_slice(&HEADER);
+    frame.push(len as u8);
+    frame.push(command);
+    frame.extend_from_slice(payload);
+    frame.push(checksum);
+    frame.push(FOOTER);
+    frame
+}
+
+fn normalize_fan_curve_points(points: &[(u8, u8)]) -> Result<Vec<(u8, u8)>> {
+    let mut normalized = points.to_vec();
+
+    match normalized.len() {
+        3 => {
+            normalized.sort_by_key(|(temp, _)| *temp);
+            validate_fan_curve_points(&normalized, true)?;
+            normalized.insert(0, (0, 0));
+            normalized.push((100, 100));
+        }
+        5 => {
+            normalized.sort_by_key(|(temp, _)| *temp);
+            validate_fan_curve_points(&normalized, false)?;
+            if normalized.first().map(|point| point.0) != Some(0) {
+                return Err(WattsonError::Protocol {
+                    message: "fan curve must start at 0C / 曲线起点温度必须是 0C".to_string(),
+                });
+            }
+            if normalized.last().map(|point| point.0) != Some(100) {
+                return Err(WattsonError::Protocol {
+                    message: "fan curve must end at 100C / 曲线终点温度必须是 100C".to_string(),
+                });
+            }
+        }
+        _ => {
+            return Err(WattsonError::Protocol {
+                message: "fan curve expects 3 control points or 5 full points / 曲线只接受 3 个控制点或 5 个完整点".to_string(),
+            })
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn validate_fan_curve_points(points: &[(u8, u8)], interior_only: bool) -> Result<()> {
+    if points.is_empty() {
+        return Err(WattsonError::Protocol {
+            message: "fan curve points cannot be empty / 曲线点不能为空".to_string(),
+        });
+    }
+
+    let mut previous_temp = None;
+    for (index, &(temp, pwm)) in points.iter().enumerate() {
+        if temp > 100 || pwm > 100 {
+            return Err(WattsonError::Protocol {
+                message: format!(
+                    "fan curve point #{index} must be within 0..=100 / 第 {index} 个曲线点必须落在 0..=100"
+                ),
+            });
+        }
+
+        if interior_only && (temp == 0 || temp == 100) {
+            return Err(WattsonError::Protocol {
+                message: "3-point input only accepts interior temperatures / 3 点输入只接受中间控制点温度".to_string(),
+            });
+        }
+
+        if let Some(previous) = previous_temp {
+            if temp <= previous {
+                return Err(WattsonError::Protocol {
+                    message:
+                        "fan curve temperatures must be strictly increasing / 曲线温度必须严格递增"
+                            .to_string(),
+                });
+            }
+        }
+        previous_temp = Some(temp);
+    }
+
+    Ok(())
+}
+
+fn interpolate_pwm(temp: u8, points: &[(u8, u8)]) -> u8 {
+    if temp <= points[0].0 {
+        return points[0].1;
+    }
+
+    for window in points.windows(2) {
+        let (t0, p0) = window[0];
+        let (t1, p1) = window[1];
+        if temp <= t1 {
+            if t1 == t0 {
+                return p1;
+            }
+
+            let ratio = (temp - t0) as f64 / (t1 - t0) as f64;
+            let pwm = p0 as f64 + (p1 as f64 - p0 as f64) * ratio;
+            return pwm.round().clamp(0.0, 100.0) as u8;
+        }
+    }
+
+    points.last().map(|(_, pwm)| *pwm).unwrap_or(0)
+}
 
 /// Packet type identifiers
 #[derive(Debug, Clone, Copy, PartialEq)]

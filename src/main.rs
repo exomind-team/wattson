@@ -4,6 +4,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use wattson::config::Config;
 use wattson::data::DeviceProfile;
+use wattson::protocol::FanMode;
 use wattson::serial::{Mode, PsuMonitor};
 
 #[derive(Parser)]
@@ -51,6 +52,11 @@ enum Commands {
         #[arg(long)]
         port: Option<u16>,
     },
+    /// Fan control / 风扇控制
+    Fan {
+        #[command(subcommand)]
+        action: FanAction,
+    },
     /// Generate chart from recorded data
     Chart {
         /// Use last N data points
@@ -69,6 +75,25 @@ enum Commands {
     Cost,
     /// List available serial ports
     Ports,
+}
+
+#[derive(Subcommand)]
+enum FanAction {
+    /// Set a flat PWM curve and switch to custom mode / 设置固定占空比并切到自定义模式
+    Set {
+        /// PWM percentage 0..100
+        pwm: u8,
+    },
+    /// Apply a custom curve JSON like [[30,40],[50,55],[70,75]] / 应用曲线 JSON
+    Curve {
+        /// Curve points as JSON
+        json: String,
+    },
+    /// Set fan mode / 设置风扇模式
+    Mode {
+        /// auto | silent | performance | custom | clean
+        mode: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -117,6 +142,7 @@ fn main() {
         Commands::Tui { refresh } => cmd_tui(&config, refresh),
         Commands::Gui { demo } => cmd_gui(&config, demo),
         Commands::Serve { port } => cmd_serve(&mut config, port),
+        Commands::Fan { action } => cmd_fan(&config, action),
         Commands::Chart {
             last,
             input,
@@ -450,6 +476,95 @@ fn cmd_ports() {
     }
 }
 
+fn cmd_fan(config: &Config, action: FanAction) {
+    let monitor = create_monitor(config);
+    let handle = match monitor.start() {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    wait_for_monitor_ready(&handle, Duration::from_secs(2));
+
+    let result = match action {
+        FanAction::Set { pwm } => handle
+            .set_fan_pwm(pwm)
+            .map(|_| format!("Fan PWM set to {} (风扇占空比已设置为 {})", pwm, pwm)),
+        FanAction::Curve { json } => parse_curve_points(&json).and_then(|points| {
+            let point_count = points.len();
+            handle
+                .set_fan_curve(points)
+                .map(|_| format!("Fan curve applied (已应用风扇曲线), points={point_count}"))
+        }),
+        FanAction::Mode { mode } => mode.parse::<FanMode>().and_then(|parsed| {
+            handle.set_fan_mode(parsed).map(|_| {
+                format!(
+                    "Fan mode set to {} (风扇模式已设置为 {})",
+                    parsed,
+                    parsed.label()
+                )
+            })
+        }),
+    };
+
+    match result {
+        Ok(message) => {
+            std::thread::sleep(Duration::from_millis(500));
+            let snap = handle.latest();
+            println!("{message}");
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "device": {
+                        "model": snap.device.model,
+                        "serial": snap.device.serial,
+                    },
+                    "fan": {
+                        "rpm": snap.fan.rpm,
+                        "raw_mode_byte": snap.fan.pwm,
+                    },
+                    "meta": {
+                        "connected": snap.meta.connected,
+                        "packet_count": snap.meta.packet_count,
+                        "data_age_s": snap.meta.data_age_s,
+                    }
+                }))
+                .unwrap()
+            );
+        }
+        Err(error) => {
+            eprintln!("Fan command failed / 风扇命令失败: {}", error);
+            handle.stop();
+            std::process::exit(1);
+        }
+    }
+
+    handle.stop();
+}
+
+fn wait_for_monitor_ready(handle: &wattson::serial::PsuHandle, timeout: Duration) {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        let snap = handle.latest();
+        if snap.meta.connected || snap.meta.packet_count > 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn parse_curve_points(json: &str) -> wattson::Result<Vec<(u8, u8)>> {
+    let parsed = serde_json::from_str::<Vec<[u8; 2]>>(json).map_err(|error| {
+        wattson::WattsonError::Protocol {
+            message: format!("invalid curve json: {error} / 曲线 JSON 无效: {error}"),
+        }
+    })?;
+
+    Ok(parsed.into_iter().map(|[temp, pwm]| (temp, pwm)).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,6 +593,41 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Serve { port: Some(9000) })
+        ));
+    }
+
+    #[test]
+    fn fan_set_command_parses() {
+        let cli = Cli::try_parse_from(["wattson", "fan", "set", "55"]).expect("parse fan set");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Fan {
+                action: FanAction::Set { pwm: 55 }
+            })
+        ));
+    }
+
+    #[test]
+    fn fan_curve_command_parses() {
+        let cli = Cli::try_parse_from(["wattson", "fan", "curve", "[[30,40],[50,55],[70,75]]"])
+            .expect("parse fan curve");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Fan {
+                action: FanAction::Curve { .. }
+            })
+        ));
+    }
+
+    #[test]
+    fn fan_mode_command_parses() {
+        let cli =
+            Cli::try_parse_from(["wattson", "fan", "mode", "custom"]).expect("parse fan mode");
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Fan {
+                action: FanAction::Mode { mode }
+            }) if mode == "custom"
         ));
     }
 }

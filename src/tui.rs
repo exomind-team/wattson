@@ -16,6 +16,7 @@ use ratatui::widgets::{
 use crate::config::Config;
 use crate::data::PsuSnapshot;
 use crate::history::History;
+use crate::protocol::FanMode;
 use crate::runtime::RuntimeState;
 use crate::serial::PsuHandle;
 
@@ -129,6 +130,9 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
     let mut tick_ms: u64 = refresh_ms.max(200);
     let mut last_tick = Instant::now();
     let mut runtime = RuntimeState::new(config.cost.price_per_kwh, config.cost.currency.clone());
+    let mut manual_pwm_target: u8 = 50;
+    let mut last_action =
+        "a/s/p/u/c:mode h/l:target pwm m:apply (模式切换 / 调整并应用占空比)".to_string();
 
     loop {
         // Wait for either a tick or an event (whichever comes first)
@@ -145,6 +149,38 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                             KeyCode::Char('q') => should_quit = true,
                             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 should_quit = true
+                            }
+                            KeyCode::Char('a') => {
+                                last_action = apply_mode_command(handle, FanMode::Auto);
+                            }
+                            KeyCode::Char('s') => {
+                                last_action = apply_mode_command(handle, FanMode::Silent);
+                            }
+                            KeyCode::Char('p') => {
+                                last_action = apply_mode_command(handle, FanMode::Performance);
+                            }
+                            KeyCode::Char('u') => {
+                                last_action = apply_mode_command(handle, FanMode::Custom);
+                            }
+                            KeyCode::Char('c') => {
+                                last_action = apply_mode_command(handle, FanMode::Clean);
+                            }
+                            KeyCode::Char('h') => {
+                                manual_pwm_target = manual_pwm_target.saturating_sub(5);
+                                last_action = format!(
+                                    "Manual PWM target: {}% (当前手动占空比目标: {}%)",
+                                    manual_pwm_target, manual_pwm_target
+                                );
+                            }
+                            KeyCode::Char('l') => {
+                                manual_pwm_target = manual_pwm_target.saturating_add(5).min(100);
+                                last_action = format!(
+                                    "Manual PWM target: {}% (当前手动占空比目标: {}%)",
+                                    manual_pwm_target, manual_pwm_target
+                                );
+                            }
+                            KeyCode::Char('m') => {
+                                last_action = apply_pwm_command(handle, manual_pwm_target);
                             }
                             KeyCode::Char('z') => {
                                 chart_scale = match chart_scale {
@@ -219,6 +255,8 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                 session_stats.average_dc_output_w,
                 chart_scale,
                 tick_ms,
+                manual_pwm_target,
+                &last_action,
             );
         })?;
     }
@@ -249,6 +287,8 @@ fn render_ui(
     session_dc_avg_w: f64,
     chart_scale: ChartScale,
     tick_ms: u64,
+    manual_pwm_target: u8,
+    last_action: &str,
 ) {
     let area = f.area();
 
@@ -318,7 +358,7 @@ fn render_ui(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[3]);
 
-    render_thermal_panel(f, snap, bottom_chunks[0]);
+    render_thermal_panel(f, snap, manual_pwm_target, last_action, bottom_chunks[0]);
     render_cost_panel(
         f,
         total_kwh,
@@ -337,7 +377,7 @@ fn render_ui(
         String::new()
     };
     let status_text = format!(
-        " q:quit z:scale +/-:fps({tick_ms}ms) [/]:poll({}ms){}",
+        " q:quit a/s/p/u/c:mode h/l:pwm({manual_pwm_target}%) m:apply z:scale +/-:fps({tick_ms}ms) [/]:poll({}ms){}",
         snap.meta.poll_ms, stale_warn,
     );
     let status_style = if snap.meta.data_age_s > 3.0 {
@@ -523,7 +563,13 @@ fn render_power_chart(
     f.render_widget(chart, area);
 }
 
-fn render_thermal_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
+fn render_thermal_panel(
+    f: &mut Frame,
+    snap: &PsuSnapshot,
+    manual_pwm_target: u8,
+    last_action: &str,
+    area: Rect,
+) {
     let temp_color = |t: f64| -> Color {
         if t > 60.0 {
             Color::Red
@@ -547,6 +593,8 @@ fn render_thermal_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
         Line::from(format!("  Air2:  {:>5.1} C", snap.thermal.temp_air2_c)),
         Line::from(format!("  Fan:   {:>5} RPM", snap.fan.rpm)),
         Line::from(format!("  PWM:   {:>5}", snap.fan.pwm)),
+        Line::from(format!("  Target:{:>5} %", manual_pwm_target)),
+        Line::from(format!("  Last: {}", last_action)),
     ];
 
     let block = Paragraph::new(lines).block(
@@ -555,6 +603,24 @@ fn render_thermal_panel(f: &mut Frame, snap: &PsuSnapshot, area: Rect) {
             .title(" Thermal & Fan "),
     );
     f.render_widget(block, area);
+}
+
+fn apply_mode_command(handle: &PsuHandle, mode: FanMode) -> String {
+    match handle.set_fan_mode(mode) {
+        Ok(()) => format!(
+            "Fan mode applied: {} (风扇模式已应用: {})",
+            mode,
+            mode.label()
+        ),
+        Err(error) => format!("Fan mode failed (风扇模式失败): {error}"),
+    }
+}
+
+fn apply_pwm_command(handle: &PsuHandle, pwm: u8) -> String {
+    match handle.set_fan_pwm(pwm) {
+        Ok(()) => format!("Fan PWM applied: {pwm}% (固定占空比已应用: {pwm}%)"),
+        Err(error) => format!("Fan PWM failed (固定占空比失败): {error}"),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

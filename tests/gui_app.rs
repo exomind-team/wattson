@@ -117,7 +117,10 @@ fn gui_app_prepares_native_screenshot_export_request() {
     assert!(path.starts_with(Path::new("docs").join("screenshots")));
     assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("png"));
 
-    let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
     assert!(file_name.starts_with("wattson-gui-"));
 
     let status = app.screenshot_export_status().unwrap_or_default();
@@ -161,10 +164,8 @@ fn gui_app_saves_native_screenshot_png_and_reports_success() {
 fn gui_app_reports_native_screenshot_export_failures() {
     let mut app = GuiApp::demo();
     let ctx = egui::Context::default();
-    let blocker = std::env::temp_dir().join(format!(
-        "wattson-screenshot-blocker-{}",
-        std::process::id()
-    ));
+    let blocker =
+        std::env::temp_dir().join(format!("wattson-screenshot-blocker-{}", std::process::id()));
     let _ = fs::remove_file(&blocker);
     fs::write(&blocker, b"block export dir").expect("create blocker file");
     let path = blocker.join("native-export.png");

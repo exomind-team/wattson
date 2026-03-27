@@ -499,9 +499,8 @@ impl GuiApp {
             }
             Err(error) => {
                 self.pending_screenshot_export = None;
-                self.last_screenshot_export_status = Some(format!(
-                    "Screenshot export failed (截图导出失败): {error}"
-                ));
+                self.last_screenshot_export_status =
+                    Some(format!("Screenshot export failed (截图导出失败): {error}"));
             }
         }
     }
@@ -914,17 +913,16 @@ impl App for GuiApp {
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        let screenshot_events: Vec<(egui::UserData, std::sync::Arc<egui::ColorImage>)> =
-            raw_input
-                .events
-                .iter()
-                .filter_map(|event| match event {
-                    egui::Event::Screenshot {
-                        user_data, image, ..
-                    } => Some((user_data.clone(), image.clone())),
-                    _ => None,
-                })
-                .collect();
+        let screenshot_events: Vec<(egui::UserData, std::sync::Arc<egui::ColorImage>)> = raw_input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::Screenshot {
+                    user_data, image, ..
+                } => Some((user_data.clone(), image.clone())),
+                _ => None,
+            })
+            .collect();
 
         raw_input
             .events

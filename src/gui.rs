@@ -8,6 +8,7 @@ use egui_plot::{Legend, Line, Plot, PlotPoints};
 use crate::config::Config;
 use crate::gui_settings::{ChartScaleMode, GuiSettings, ThemePreference};
 use crate::history::History;
+use crate::protocol::FanMode;
 use crate::runtime::{DemoGenerator, RuntimeState};
 use crate::serial::PsuHandle;
 
@@ -78,6 +79,34 @@ fn load_localized_font_bytes() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|path| std::fs::read(path).ok())
 }
 
+/// Format a serial number for display / 格式化序列号显示
+pub fn format_serial_for_display(serial: &str, show_full: bool) -> String {
+    if serial.is_empty() {
+        return "N/A".to_string();
+    }
+
+    if show_full {
+        return serial.to_string();
+    }
+
+    let char_count = serial.chars().count();
+    if char_count <= 4 {
+        return "*".repeat(char_count);
+    }
+
+    let prefix: String = serial.chars().take(2).collect();
+    let suffix: String = serial
+        .chars()
+        .rev()
+        .take(2)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    format!("{prefix}{}{suffix}", "*".repeat(char_count - 4))
+}
+
 enum SourceMode {
     Demo { step: u64 },
     Live { handle: Option<PsuHandle> },
@@ -114,6 +143,10 @@ pub struct GuiApp {
     runtime: RuntimeState,
     history: History,
     source: SourceMode,
+    selected_fan_mode: FanMode,
+    manual_fan_pwm: u8,
+    custom_curve_points: [(u8, u8); 3],
+    last_fan_command_status: Option<String>,
     started_at: Instant,
     last_sample_at: Instant,
     last_frame_at: Instant,
@@ -162,6 +195,10 @@ impl GuiApp {
             } else {
                 SourceMode::Live { handle }
             },
+            selected_fan_mode: FanMode::Auto,
+            manual_fan_pwm: 50,
+            custom_curve_points: [(40, 20), (60, 30), (80, 70)],
+            last_fan_command_status: None,
             settings,
             started_at: Instant::now(),
             last_sample_at: Instant::now() - Duration::from_millis(1_000),
@@ -193,6 +230,22 @@ impl GuiApp {
     pub fn set_series_visibility(&mut self, show_ac_input: bool, show_dc_output: bool) {
         self.settings.show_ac_input = show_ac_input;
         self.settings.show_dc_output = show_dc_output;
+    }
+
+    pub fn set_show_full_serial(&mut self, show_full_serial: bool) {
+        self.settings.show_full_serial = show_full_serial;
+    }
+
+    pub fn serial_display_text(&self) -> String {
+        self.runtime
+            .latest()
+            .map(|sample| {
+                format_serial_for_display(
+                    &sample.snapshot.device.serial,
+                    self.settings.show_full_serial,
+                )
+            })
+            .unwrap_or_else(|| "N/A".to_string())
     }
 
     pub fn set_ui_refresh_ms(&mut self, ui_refresh_ms: u64) {
@@ -335,6 +388,63 @@ impl GuiApp {
         });
     }
 
+    fn fan_controls_enabled(&self) -> bool {
+        matches!(self.source, SourceMode::Live { handle: Some(_) })
+    }
+
+    fn with_live_handle<R>(&self, f: impl FnOnce(&PsuHandle) -> R) -> Option<R> {
+        match &self.source {
+            SourceMode::Live {
+                handle: Some(handle),
+            } => Some(f(handle)),
+            _ => None,
+        }
+    }
+
+    fn apply_selected_fan_mode(&mut self) {
+        let message =
+            match self.with_live_handle(|handle| handle.set_fan_mode(self.selected_fan_mode)) {
+                Some(Ok(())) => format!(
+                    "Fan mode applied: {} (风扇模式已应用: {})",
+                    self.selected_fan_mode,
+                    self.selected_fan_mode.label()
+                ),
+                Some(Err(error)) => format!("Fan mode failed (风扇模式失败): {error}"),
+                None => "Live device required for fan control (风扇控制需要实时设备)".to_string(),
+            };
+        self.last_fan_command_status = Some(message);
+    }
+
+    fn apply_manual_fan_pwm(&mut self) {
+        let pwm = self.manual_fan_pwm;
+        let message = match self.with_live_handle(|handle| handle.set_fan_pwm(pwm)) {
+            Some(Ok(())) => format!("Fan PWM applied: {pwm}% (固定占空比已应用: {pwm}%)"),
+            Some(Err(error)) => format!("Fan PWM failed (固定占空比失败): {error}"),
+            None => "Live device required for fan control (风扇控制需要实时设备)".to_string(),
+        };
+        self.last_fan_command_status = Some(message);
+    }
+
+    fn apply_custom_curve(&mut self) {
+        let curve = vec![
+            (0, 0),
+            self.custom_curve_points[0],
+            self.custom_curve_points[1],
+            self.custom_curve_points[2],
+            (100, 100),
+        ];
+
+        let message = match self.with_live_handle(|handle| handle.set_fan_curve(curve.clone())) {
+            Some(Ok(())) => format!(
+                "Custom curve applied (自定义曲线已应用): {:?}",
+                self.custom_curve_points
+            ),
+            Some(Err(error)) => format!("Custom curve failed (自定义曲线失败): {error}"),
+            None => "Live device required for fan control (风扇控制需要实时设备)".to_string(),
+        };
+        self.last_fan_command_status = Some(message);
+    }
+
     fn render_top_bar(&mut self, ui: &mut egui::Ui) {
         let Some(latest) = self.runtime.latest() else {
             return;
@@ -346,11 +456,7 @@ impl GuiApp {
             latest.snapshot.device.model.as_str()
         };
 
-        let serial = if latest.snapshot.device.serial.is_empty() {
-            "N/A"
-        } else {
-            latest.snapshot.device.serial.as_str()
-        };
+        let serial = self.serial_display_text();
 
         egui::Panel::top("top_bar").show_inside(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -358,6 +464,10 @@ impl GuiApp {
                 ui.separator();
                 ui.label(RichText::new(device_name).strong());
                 ui.label(format!("S/N 序列号: {serial}"));
+                ui.checkbox(
+                    &mut self.settings.show_full_serial,
+                    "Show Full S/N 显示完整序列号",
+                );
                 ui.separator();
                 ui.label(format!(
                     "Source 数据源: {}",
@@ -524,6 +634,96 @@ impl GuiApp {
                 ui.label(format!("Target FPS 目标帧率: {:.1}", perf.target_fps));
                 ui.label(format!("Actual FPS 实际帧率: {:.1}", perf.actual_fps));
                 ui.label(format!("Frame Time 帧耗时: {:.1} ms", perf.frame_time_ms));
+
+                ui.separator();
+                ui.heading("Fan Control 风扇控制");
+
+                if !self.fan_controls_enabled() {
+                    ui.label("Demo / 离线模式下禁用写入控制");
+                }
+
+                ui.add_enabled_ui(self.fan_controls_enabled(), |ui| {
+                    egui::ComboBox::from_label("Fan Mode 风扇模式")
+                        .selected_text(self.selected_fan_mode.label())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.selected_fan_mode,
+                                FanMode::Auto,
+                                FanMode::Auto.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.selected_fan_mode,
+                                FanMode::Silent,
+                                FanMode::Silent.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.selected_fan_mode,
+                                FanMode::Performance,
+                                FanMode::Performance.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.selected_fan_mode,
+                                FanMode::Custom,
+                                FanMode::Custom.label(),
+                            );
+                            ui.selectable_value(
+                                &mut self.selected_fan_mode,
+                                FanMode::Clean,
+                                FanMode::Clean.label(),
+                            );
+                        });
+
+                    if ui.button("Apply Mode 应用模式").clicked() {
+                        self.apply_selected_fan_mode();
+                    }
+
+                    ui.separator();
+                    ui.label("Manual PWM 固定占空比");
+                    ui.add(egui::Slider::new(&mut self.manual_fan_pwm, 0..=100).suffix(" %"));
+                    if ui.button("Apply PWM 应用占空比").clicked() {
+                        self.apply_manual_fan_pwm();
+                    }
+
+                    ui.separator();
+                    ui.label("Custom Curve 自定义曲线");
+
+                    let mut p1 = self.custom_curve_points[0];
+                    ui.horizontal(|ui| {
+                        ui.label("P1 点1");
+                        ui.add(egui::Slider::new(&mut p1.0, 5..=60).suffix(" C"));
+                        ui.add(egui::Slider::new(&mut p1.1, 0..=100).suffix(" %"));
+                    });
+                    self.custom_curve_points[0] = p1;
+
+                    let mut p2 = self.custom_curve_points[1];
+                    ui.horizontal(|ui| {
+                        ui.label("P2 点2");
+                        let min = (p1.0.saturating_add(5)).min(85);
+                        let max = 85u8.max(min);
+                        ui.add(egui::Slider::new(&mut p2.0, min..=max).suffix(" C"));
+                        ui.add(egui::Slider::new(&mut p2.1, 0..=100).suffix(" %"));
+                    });
+                    self.custom_curve_points[1] = p2;
+
+                    let mut p3 = self.custom_curve_points[2];
+                    ui.horizontal(|ui| {
+                        ui.label("P3 点3");
+                        let min = (p2.0.saturating_add(5)).min(95);
+                        let max = 95u8.max(min);
+                        ui.add(egui::Slider::new(&mut p3.0, min..=max).suffix(" C"));
+                        ui.add(egui::Slider::new(&mut p3.1, 0..=100).suffix(" %"));
+                    });
+                    self.custom_curve_points[2] = p3;
+
+                    if ui.button("Apply Curve 应用曲线").clicked() {
+                        self.apply_custom_curve();
+                    }
+                });
+
+                if let Some(status) = &self.last_fan_command_status {
+                    ui.separator();
+                    ui.label(status);
+                }
             });
     }
 

@@ -29,6 +29,7 @@ pub enum ChartScaleMode {
 
 /// Persisted desktop controls / 图形界面持久化设置
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct GuiSettings {
     pub theme: ThemePreference,
     pub chart_window_s: u64,
@@ -36,6 +37,7 @@ pub struct GuiSettings {
     pub poll_interval_ms: u64,
     pub show_ac_input: bool,
     pub show_dc_output: bool,
+    pub show_full_serial: bool,
     pub chart_scale: ChartScaleMode,
     pub window_width: u32,
     pub window_height: u32,
@@ -50,6 +52,7 @@ impl Default for GuiSettings {
             poll_interval_ms: 300,
             show_ac_input: true,
             show_dc_output: true,
+            show_full_serial: false,
             chart_scale: ChartScaleMode::Auto,
             window_width: 1440,
             window_height: 900,

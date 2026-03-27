@@ -18,6 +18,7 @@ fn gui_settings_defaults_are_desktop_friendly() {
     assert_eq!(settings.poll_interval_ms, 300);
     assert!(settings.show_ac_input);
     assert!(settings.show_dc_output);
+    assert!(!settings.show_full_serial);
     assert_eq!(settings.chart_scale, ChartScaleMode::Auto);
 }
 
@@ -33,6 +34,7 @@ fn gui_settings_round_trip_persistence() {
         poll_interval_ms: 500,
         show_ac_input: true,
         show_dc_output: false,
+        show_full_serial: true,
         chart_scale: ChartScaleMode::ZeroBased,
         ..GuiSettings::default()
     };
@@ -46,7 +48,36 @@ fn gui_settings_round_trip_persistence() {
     assert_eq!(loaded.poll_interval_ms, 500);
     assert!(loaded.show_ac_input);
     assert!(!loaded.show_dc_output);
+    assert!(loaded.show_full_serial);
     assert_eq!(loaded.chart_scale, ChartScaleMode::ZeroBased);
+
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn legacy_gui_settings_without_serial_toggle_still_load() {
+    let path = temp_settings_path("legacy-no-serial-toggle");
+    let _ = std::fs::remove_file(&path);
+
+    std::fs::write(
+        &path,
+        r#"{
+  "theme": "system",
+  "chart_window_s": 120,
+  "ui_refresh_ms": 16,
+  "poll_interval_ms": 300,
+  "show_ac_input": true,
+  "show_dc_output": true,
+  "chart_scale": "auto",
+  "window_width": 1440,
+  "window_height": 900
+}"#,
+    )
+    .expect("write legacy settings");
+
+    let loaded = GuiSettings::load_from(&path).expect("load legacy GUI settings");
+
+    assert!(!loaded.show_full_serial);
 
     let _ = std::fs::remove_file(path);
 }

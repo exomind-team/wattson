@@ -1,3 +1,5 @@
+use std::io::Write;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -6,7 +8,7 @@ use serialport::SerialPort;
 
 use crate::data::{DeviceProfile, PsuSnapshot};
 use crate::error::{Result, WattsonError};
-use crate::protocol::{self, PacketType, QUERY_CMD};
+use crate::protocol::{self, FanMode, PacketType, QUERY_CMD};
 
 /// Communication mode
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,6 +21,18 @@ pub enum Mode {
 
 /// Shared state between reader thread and consumer
 type SharedState = Arc<Mutex<PsuState>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SerialCommand {
+    Mode(FanMode),
+    Curve(Vec<(u8, u8)>),
+    Pwm(u8),
+}
+
+struct CommandRequest {
+    command: SerialCommand,
+    reply_tx: Sender<Result<()>>,
+}
 
 struct PsuState {
     snapshot: PsuSnapshot,
@@ -49,6 +63,7 @@ pub struct PsuHandle {
     state: SharedState,
     stop: Arc<Mutex<bool>>,
     poll_ms: Arc<Mutex<u64>>,
+    command_tx: Sender<CommandRequest>,
     _thread: thread::JoinHandle<()>,
 }
 
@@ -84,6 +99,32 @@ impl PsuHandle {
     pub fn set_poll_ms(&self, ms: u64) {
         let ms = ms.clamp(200, 5000);
         *self.poll_ms.lock().unwrap() = ms;
+    }
+
+    /// Set fan mode / 设置风扇模式
+    pub fn set_fan_mode(&self, mode: FanMode) -> Result<()> {
+        self.send_command(SerialCommand::Mode(mode))
+    }
+
+    /// Set a flat PWM curve and switch to custom mode / 设置固定占空比并切到自定义模式
+    pub fn set_fan_pwm(&self, value: u8) -> Result<()> {
+        self.send_command(SerialCommand::Pwm(value))
+    }
+
+    /// Set a custom fan curve and switch to custom mode / 设置自定义风扇曲线并切到自定义模式
+    pub fn set_fan_curve(&self, points: Vec<(u8, u8)>) -> Result<()> {
+        self.send_command(SerialCommand::Curve(points))
+    }
+
+    fn send_command(&self, command: SerialCommand) -> Result<()> {
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.command_tx
+            .send(CommandRequest { command, reply_tx })
+            .map_err(|_| WattsonError::NotConnected)?;
+
+        reply_rx
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| WattsonError::Timeout)?
     }
 }
 
@@ -125,6 +166,7 @@ impl PsuMonitor {
         let state: SharedState = Arc::new(Mutex::new(PsuState::new()));
         let stop = Arc::new(Mutex::new(false));
         let poll_ms = Arc::new(Mutex::new(self.poll_interval.as_millis() as u64));
+        let (command_tx, command_rx) = mpsc::channel();
 
         let state_clone = state.clone();
         let stop_clone = stop.clone();
@@ -141,6 +183,7 @@ impl PsuMonitor {
                     poll_ms_clone,
                     state_clone,
                     stop_clone,
+                    command_rx,
                 );
             })
             .map_err(WattsonError::Io)?;
@@ -149,11 +192,13 @@ impl PsuMonitor {
             state,
             stop,
             poll_ms,
+            command_tx,
             _thread: thread,
         })
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn reader_loop(
     port: String,
     baud: u32,
@@ -162,10 +207,11 @@ fn reader_loop(
     poll_ms: Arc<Mutex<u64>>,
     state: SharedState,
     stop: Arc<Mutex<bool>>,
+    commands_rx: Receiver<CommandRequest>,
 ) {
     while !*stop.lock().unwrap() {
         match serialport::new(&port, baud)
-            .timeout(Duration::from_secs(2))
+            .timeout(Duration::from_millis(100))
             .open()
         {
             Ok(mut serial) => {
@@ -179,7 +225,15 @@ fn reader_loop(
                 let _ = serial.write(&QUERY_CMD);
                 log::debug!("Sent initial QUERY_CMD to {}", port);
 
-                if let Err(e) = read_frames(&mut *serial, mode, &profile, &poll_ms, &state, &stop) {
+                if let Err(e) = read_frames(
+                    &mut *serial,
+                    mode,
+                    &profile,
+                    &poll_ms,
+                    &state,
+                    &stop,
+                    &commands_rx,
+                ) {
                     log::warn!("Read error: {}", e);
                     let mut s = state.lock().unwrap();
                     s.snapshot.meta.connected = false;
@@ -196,6 +250,7 @@ fn reader_loop(
                 } else {
                     log::error!("Cannot open {}: {}", port, e);
                 }
+                reject_pending_commands(&commands_rx);
             }
         }
 
@@ -212,6 +267,7 @@ fn read_frames(
     poll_ms: &Arc<Mutex<u64>>,
     state: &SharedState,
     stop: &Arc<Mutex<bool>>,
+    commands_rx: &Receiver<CommandRequest>,
 ) -> Result<()> {
     let mut buf = Vec::with_capacity(4096);
     let mut read_buf = [0u8; 512];
@@ -225,6 +281,12 @@ fn read_frames(
             Ok(_) => {}
             Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(e) => return Err(WattsonError::Io(e)),
+        }
+
+        while let Ok(request) = commands_rx.try_recv() {
+            let result = process_command(serial, &request.command);
+            let _ = request.reply_tx.send(result);
+            last_query = Instant::now();
         }
 
         // Periodic query: use dynamic poll interval from shared state
@@ -263,6 +325,55 @@ fn read_frames(
     }
 
     Ok(())
+}
+
+fn reject_pending_commands(commands_rx: &Receiver<CommandRequest>) {
+    while let Ok(request) = commands_rx.try_recv() {
+        let _ = request.reply_tx.send(Err(WattsonError::NotConnected));
+    }
+}
+
+fn process_command(serial: &mut dyn SerialPort, command: &SerialCommand) -> Result<()> {
+    for frame in build_frames_for_command(command)? {
+        serial.write_all(&frame)?;
+        serial.flush()?;
+        thread::sleep(Duration::from_millis(40));
+    }
+
+    serial.write_all(&QUERY_CMD)?;
+    serial.flush()?;
+    Ok(())
+}
+
+fn build_frames_for_command(command: &SerialCommand) -> Result<Vec<Vec<u8>>> {
+    match command {
+        SerialCommand::Mode(mode) => Ok(vec![protocol::build_fan_mode_frame(*mode)]),
+        SerialCommand::Curve(points) => Ok(vec![
+            protocol::build_fan_curve_frame(points)?,
+            protocol::build_fan_mode_frame(FanMode::Custom),
+        ]),
+        SerialCommand::Pwm(value) => {
+            if *value > 100 {
+                return Err(WattsonError::Protocol {
+                    message: "fan pwm must be within 0..=100 / 风扇占空比必须在 0..=100"
+                        .to_string(),
+                });
+            }
+
+            let flat_curve = vec![
+                (0, *value),
+                (30, *value),
+                (60, *value),
+                (90, *value),
+                (100, *value),
+            ];
+
+            Ok(vec![
+                protocol::build_fan_curve_frame(&flat_curve)?,
+                protocol::build_fan_mode_frame(FanMode::Custom),
+            ])
+        }
+    }
 }
 
 fn process_payload(payload: &[u8], profile: &DeviceProfile, state: &SharedState) {
@@ -361,5 +472,84 @@ fn process_payload(payload: &[u8], profile: &DeviceProfile, state: &SharedState)
         PacketType::Unknown(_) => {
             s.snapshot.meta.error_count += 1;
         }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_handle_with_recorder(
+    snapshot: PsuSnapshot,
+) -> (PsuHandle, Receiver<SerialCommand>) {
+    let mut state_value = PsuState::new();
+    state_value.snapshot = snapshot;
+    state_value.last_update = Some(Instant::now());
+
+    let state = Arc::new(Mutex::new(state_value));
+    let stop = Arc::new(Mutex::new(false));
+    let poll_ms = Arc::new(Mutex::new(300));
+    let (command_tx, command_rx) = mpsc::channel::<CommandRequest>();
+    let (record_tx, record_rx) = mpsc::channel::<SerialCommand>();
+
+    let worker = thread::spawn(move || {
+        while let Ok(request) = command_rx.recv() {
+            let _ = record_tx.send(request.command.clone());
+            let _ = request.reply_tx.send(Ok(()));
+        }
+    });
+
+    (
+        PsuHandle {
+            state,
+            stop,
+            poll_ms,
+            command_tx,
+            _thread: worker,
+        },
+        record_rx,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::protocol::{self, FanMode};
+
+    #[test]
+    fn build_frames_for_set_fan_mode_uses_single_short_frame() {
+        let frames =
+            build_frames_for_command(&SerialCommand::Mode(FanMode::Custom)).expect("mode frames");
+
+        assert_eq!(
+            frames,
+            vec![protocol::build_fan_mode_frame(FanMode::Custom)]
+        );
+    }
+
+    #[test]
+    fn build_frames_for_set_fan_pwm_writes_curve_then_custom_mode() {
+        let frames = build_frames_for_command(&SerialCommand::Pwm(80)).expect("pwm frames");
+
+        assert_eq!(frames.len(), 2);
+        assert_eq!(
+            frames[0],
+            protocol::build_fan_curve_frame(&[(0, 80), (30, 80), (60, 80), (90, 80), (100, 80)])
+                .expect("curve frame")
+        );
+        assert_eq!(frames[1], protocol::build_fan_mode_frame(FanMode::Custom));
+    }
+
+    #[test]
+    fn handle_can_enqueue_fan_commands_to_background_worker() {
+        let mut snapshot = crate::data::PsuSnapshot::default();
+        snapshot.meta.connected = true;
+
+        let (handle, receiver) = test_handle_with_recorder(snapshot);
+        handle.set_fan_pwm(55).expect("send pwm command");
+
+        let command = receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("recorded command");
+        assert_eq!(command, SerialCommand::Pwm(55));
     }
 }

@@ -1,4 +1,4 @@
-use wattson::gui::GuiApp;
+use wattson::gui::{format_serial_for_display, GuiApp};
 use wattson::gui_settings::ThemePreference;
 
 #[test]
@@ -68,4 +68,24 @@ fn gui_demo_prefills_enough_history_for_the_default_chart_window() {
     let metrics = app.summary_metrics().expect("summary metrics");
 
     assert!(metrics.session_duration_s >= app.settings().chart_window_s as f64 - 1.0);
+}
+
+#[test]
+fn serial_number_is_masked_by_default_for_privacy() {
+    let app = GuiApp::demo();
+
+    assert!(!app.settings().show_full_serial);
+    assert_eq!(app.serial_display_text(), "DE*****01");
+}
+
+#[test]
+fn serial_number_can_be_revealed_explicitly() {
+    let mut app = GuiApp::demo();
+    app.set_show_full_serial(true);
+
+    assert_eq!(app.serial_display_text(), "DEMO-0001");
+    assert_eq!(
+        format_serial_for_display("SBSN1B50B00005", false),
+        "SB**********05"
+    );
 }

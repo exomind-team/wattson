@@ -31,4 +31,5 @@ pub mod tui;
 pub use config::Config;
 pub use data::{CostData, DeviceProfile, PsuSnapshot};
 pub use error::{Result, WattsonError};
+pub use protocol::FanMode;
 pub use serial::{Mode, PsuHandle, PsuMonitor};

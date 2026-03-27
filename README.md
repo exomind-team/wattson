@@ -35,9 +35,11 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 
 <div align="center">
 
-<img src="docs/screenshots/native-gui-dark.png" alt="Wattson Native egui + wgpu Dashboard" width="720">
+<img src="docs/screenshots/native-gui-live-dm1000g.png" alt="Wattson Native GUI Dashboard — DM-1000G Live Monitoring" width="820">
 
-*Native GUI dashboard: `egui` + `wgpu`, theme-aware, fast desktop rendering*
+*Native GUI dashboard: `egui` + `wgpu`, exported from the app itself with live DM-1000G data*
+
+*原生 GUI 仪表盘：`egui` + `wgpu`，由应用内原生导出，展示 DM-1000G 实时数据*
 
 </div>
 
@@ -45,9 +47,11 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 
 <div align="center">
 
-<img src="assets/demo_tui.png" alt="Wattson TUI Dashboard — DM-1000GD Real-time Monitoring" width="600">
+<img src="docs/screenshots/legacy-tui-dashboard.png" alt="Wattson TUI Dashboard — DM-1000G Real-time Monitoring" width="680">
 
 *TUI dashboard: power trend chart, DC rails, thermal & fan, cost tracking*
+
+*TUI 面板：功率趋势、DC 电压、温度风扇和电费统计*
 
 </div>
 
@@ -63,6 +67,8 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 
 - **🖼️ Native GUI dashboard (`egui` + `wgpu`)** — GPU-backed desktop UI with live charts, theme switching, and control-side settings
   原生桌面界面（`egui` + `wgpu`）— GPU 渲染实时图表、主题切换和图形控制设置
+- **📸 Native screenshot export** — export the complete GUI window from inside the app without depending on OS-level window capture
+  原生截图导出 — 由应用内部直接导出完整 GUI，不依赖操作系统层面的窗口抓屏
 - **🌀 Fan write control (`0x13` / `0x1B`)** — set fan mode, flat PWM, or custom curve through the same background serial session
   风扇写入控制（`0x13` / `0x1B`）— 通过同一个后台串口会话设置风扇模式、固定占空比或自定义曲线
 - **🔌 Real-time power monitoring** — AC input (EMA-smoothed), DC output, conversion efficiency
@@ -93,6 +99,7 @@ We built Wattson. It started with a Segotep DM-1000G and curiosity about what's 
 | Series 曲线显隐 | AC / DC independently toggleable |
 | Scale 缩放 | Auto / Zero Based |
 | Serial Visibility 序列号显示 | masked by default, optional full reveal 默认脱敏，可手动显示完整值 |
+| Screenshot Export 截图导出 | export the current GUI as PNG from inside the app 应用内直接导出当前 GUI 为 PNG |
 | Fan Mode 风扇模式 | `Auto / Silent / Performance / Custom / Clean` |
 | Manual PWM 固定占空比 | 0–100%, sends a flat custom curve |
 | Custom Curve 自定义曲线 | 3 editable control points + fixed `0C/100C` endpoints |
@@ -164,6 +171,9 @@ wattson ports
 # Default desktop launch (GUI-first)  默认启动原生 GUI
 wattson
 
+# Native GUI with live PSU data  用真实电源数据启动 GUI
+wattson gui
+
 # Native GUI with deterministic demo data  用演示数据启动 GUI
 wattson gui --demo
 
@@ -194,6 +204,20 @@ wattson fan curve "[[30,40],[50,55],[70,75]]"
 # Generate chart  生成图表
 wattson chart --last 60
 ```
+
+### Screenshot Export / 截图导出
+
+```bash
+# Launch the native GUI with live data  启动真实数据 GUI
+wattson gui
+
+# Launch the TUI dashboard  启动 TUI 面板
+wattson tui
+```
+
+- In the GUI, click `Export Screenshot 导出截图` to save a PNG into `docs/screenshots/`
+- GUI 导出走应用内原生渲染路径，不依赖外部窗口位置、焦点或整屏截图
+- TUI 截图当前作为文档资产维护在 `docs/screenshots/legacy-tui-dashboard.png`
 
 ### Configuration / 配置管理
 

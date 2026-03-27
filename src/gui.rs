@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::{Duration as ChronoDuration, Utc};
@@ -147,6 +149,8 @@ pub struct GuiApp {
     manual_fan_pwm: u8,
     custom_curve_points: [(u8, u8); 3],
     last_fan_command_status: Option<String>,
+    pending_screenshot_export: Option<PathBuf>,
+    last_screenshot_export_status: Option<String>,
     started_at: Instant,
     last_sample_at: Instant,
     last_frame_at: Instant,
@@ -199,6 +203,8 @@ impl GuiApp {
             manual_fan_pwm: 50,
             custom_curve_points: [(40, 20), (60, 30), (80, 70)],
             last_fan_command_status: None,
+            pending_screenshot_export: None,
+            last_screenshot_export_status: None,
             settings,
             started_at: Instant::now(),
             last_sample_at: Instant::now() - Duration::from_millis(1_000),
@@ -246,6 +252,31 @@ impl GuiApp {
                 )
             })
             .unwrap_or_else(|| "N/A".to_string())
+    }
+
+    pub fn pending_screenshot_export_path(&self) -> Option<&Path> {
+        self.pending_screenshot_export.as_deref()
+    }
+
+    pub fn screenshot_export_status(&self) -> Option<&str> {
+        self.last_screenshot_export_status.as_deref()
+    }
+
+    pub fn begin_screenshot_export(&mut self, path: PathBuf) {
+        self.pending_screenshot_export = Some(path.clone());
+        self.last_screenshot_export_status = Some(format!(
+            "Screenshot export pending (截图导出等待中): {}",
+            path.display()
+        ));
+    }
+
+    pub fn request_screenshot_export(&mut self, ctx: &egui::Context) -> PathBuf {
+        let path = default_screenshot_export_path();
+        self.begin_screenshot_export(path.clone());
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(
+            path.clone(),
+        )));
+        path
     }
 
     pub fn set_ui_refresh_ms(&mut self, ui_refresh_ms: u64) {
@@ -445,6 +476,36 @@ impl GuiApp {
         self.last_fan_command_status = Some(message);
     }
 
+    fn finish_screenshot_export(&mut self, user_data: &egui::UserData, image: &egui::ColorImage) {
+        let path = screenshot_path_from_user_data(user_data)
+            .or_else(|| self.pending_screenshot_export.clone());
+
+        let Some(path) = path else {
+            self.pending_screenshot_export = None;
+            self.last_screenshot_export_status = Some(
+                "Screenshot export failed (截图导出失败): missing export path / 缺少导出路径"
+                    .to_string(),
+            );
+            return;
+        };
+
+        match save_color_image_png(&path, image) {
+            Ok(()) => {
+                self.pending_screenshot_export = None;
+                self.last_screenshot_export_status = Some(format!(
+                    "Screenshot exported successfully (截图导出成功): {}",
+                    path.display()
+                ));
+            }
+            Err(error) => {
+                self.pending_screenshot_export = None;
+                self.last_screenshot_export_status = Some(format!(
+                    "Screenshot export failed (截图导出失败): {error}"
+                ));
+            }
+        }
+    }
+
     fn render_top_bar(&mut self, ui: &mut egui::Ui) {
         let Some(latest) = self.runtime.latest() else {
             return;
@@ -634,6 +695,16 @@ impl GuiApp {
                 ui.label(format!("Target FPS 目标帧率: {:.1}", perf.target_fps));
                 ui.label(format!("Actual FPS 实际帧率: {:.1}", perf.actual_fps));
                 ui.label(format!("Frame Time 帧耗时: {:.1} ms", perf.frame_time_ms));
+
+                ui.separator();
+                ui.heading("Screenshot 截图导出");
+                if ui.button("Export Screenshot 导出截图").clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.request_screenshot_export(&ctx);
+                }
+                if let Some(status) = &self.last_screenshot_export_status {
+                    ui.label(status);
+                }
 
                 ui.separator();
                 ui.heading("Fan Control 风扇控制");
@@ -841,6 +912,28 @@ impl App for GuiApp {
         self.render_chart(ui);
         self.render_status_bar(ui);
     }
+
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        let screenshot_events: Vec<(egui::UserData, std::sync::Arc<egui::ColorImage>)> =
+            raw_input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Screenshot {
+                        user_data, image, ..
+                    } => Some((user_data.clone(), image.clone())),
+                    _ => None,
+                })
+                .collect();
+
+        raw_input
+            .events
+            .retain(|event| !matches!(event, egui::Event::Screenshot { .. }));
+
+        for (user_data, image) in screenshot_events {
+            self.finish_screenshot_export(&user_data, &image);
+        }
+    }
 }
 
 impl Drop for GuiApp {
@@ -881,6 +974,49 @@ fn format_data_age(data_age_s: f64) -> String {
     format!("{data_age_s:.1}s")
 }
 
+fn default_screenshot_export_path() -> PathBuf {
+    let now = Utc::now();
+    let file_name = format!(
+        "wattson-gui-{}-{:03}.png",
+        now.format("%Y%m%d-%H%M%S"),
+        now.timestamp_subsec_millis()
+    );
+    PathBuf::from("docs").join("screenshots").join(file_name)
+}
+
+fn screenshot_path_from_user_data(user_data: &egui::UserData) -> Option<PathBuf> {
+    user_data
+        .data
+        .as_ref()
+        .and_then(|data| data.downcast_ref::<PathBuf>())
+        .cloned()
+}
+
+fn save_color_image_png(path: &Path, image: &egui::ColorImage) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create dir {}: {error}", parent.display()))?;
+    }
+
+    let rgba: Vec<u8> = image
+        .pixels
+        .iter()
+        .flat_map(|pixel| pixel.to_srgba_unmultiplied())
+        .collect();
+
+    let buffer = image::RgbaImage::from_raw(image.size[0] as u32, image.size[1] as u32, rgba)
+        .ok_or_else(|| {
+            format!(
+                "Failed to build RGBA buffer for screenshot (截图缓冲区构建失败): {}x{}",
+                image.size[0], image.size[1]
+            )
+        })?;
+
+    buffer
+        .save_with_format(path, image::ImageFormat::Png)
+        .map_err(|error| format!("Failed to save {}: {error}", path.display()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -889,5 +1025,13 @@ mod tests {
     fn format_data_age_hides_non_finite_values() {
         assert_eq!(format_data_age(f64::INFINITY), "N/A 未知");
         assert_eq!(format_data_age(f64::NAN), "N/A 未知");
+    }
+
+    #[test]
+    fn default_screenshot_export_path_targets_docs_screenshots() {
+        let path = default_screenshot_export_path();
+
+        assert!(path.starts_with(Path::new("docs").join("screenshots")));
+        assert_eq!(path.extension().and_then(|ext| ext.to_str()), Some("png"));
     }
 }

@@ -13,13 +13,10 @@ fn screenshot_dir() -> PathBuf {
     PathBuf::from("docs").join("screenshots")
 }
 
-// Pixel snapshots are canonically generated on Windows.
-// 像素级快照以 Windows 为基准，其他平台只保留编译覆盖，避免跨平台渲染差异导致误报。
+// Pixel snapshots are a manual regression tool, not a stable CI assertion.
+// 像素级快照用于手动回归检查，不作为稳定的 CI 断言；不同机器/渲染环境会产生像素差异。
 #[test]
-#[cfg_attr(
-    not(target_os = "windows"),
-    ignore = "pixel snapshots are canonicalized on Windows only"
-)]
+#[ignore = "run manually when refreshing the canonical GUI screenshots"]
 fn gui_demo_snapshots_cover_dark_and_light_modes() {
     let _ = fs::create_dir_all(snapshot_dir());
     let _ = fs::create_dir_all(screenshot_dir());

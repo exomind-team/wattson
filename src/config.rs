@@ -145,12 +145,24 @@ impl Default for Config {
 impl Config {
     /// Find config file: current dir first, then ~/.config/wattson/
     fn find_path() -> Option<PathBuf> {
-        let local = PathBuf::from("wattson.toml");
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::find_path_for(&cwd, dirs::config_dir().as_deref())
+    }
+
+    fn find_path_for(cwd: &Path, global_config_dir: Option<&Path>) -> Option<PathBuf> {
+        if let Some(shared_root) = Self::linked_worktree_primary_root(cwd) {
+            let shared = shared_root.join("wattson.toml");
+            if shared.exists() {
+                return Some(shared);
+            }
+        }
+
+        let local = cwd.join("wattson.toml");
         if local.exists() {
             return Some(local);
         }
 
-        if let Some(config_dir) = dirs::config_dir() {
+        if let Some(config_dir) = global_config_dir {
             let global = config_dir.join("wattson").join("wattson.toml");
             if global.exists() {
                 return Some(global);
@@ -158,6 +170,43 @@ impl Config {
         }
 
         None
+    }
+
+    fn default_path() -> PathBuf {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        Self::default_path_for(&cwd)
+    }
+
+    fn default_path_for(cwd: &Path) -> PathBuf {
+        if let Some(shared_root) = Self::linked_worktree_primary_root(cwd) {
+            return shared_root.join("wattson.toml");
+        }
+
+        cwd.join("wattson.toml")
+    }
+
+    fn linked_worktree_primary_root(cwd: &Path) -> Option<PathBuf> {
+        let dot_git = cwd.join(".git");
+        if !dot_git.is_file() {
+            return None;
+        }
+
+        let git_pointer = fs::read_to_string(&dot_git).ok()?;
+        let gitdir = git_pointer.strip_prefix("gitdir:")?.trim();
+        let gitdir_path = PathBuf::from(gitdir);
+        let gitdir_path = if gitdir_path.is_absolute() {
+            gitdir_path
+        } else {
+            cwd.join(gitdir_path)
+        };
+
+        let worktrees_dir = gitdir_path.parent()?;
+        if worktrees_dir.file_name()? != "worktrees" {
+            return None;
+        }
+
+        let common_git_dir = worktrees_dir.parent()?;
+        common_git_dir.parent().map(Path::to_path_buf)
     }
 
     /// Load config from file, or return default if no file found
@@ -177,7 +226,7 @@ impl Config {
 
     /// Save config to the given path (or default location)
     pub fn save(&self) -> Result<PathBuf, String> {
-        let path = Self::find_path().unwrap_or_else(|| PathBuf::from("wattson.toml"));
+        let path = Self::find_path().unwrap_or_else(Self::default_path);
         self.save_to(&path)?;
         Ok(path)
     }
@@ -232,9 +281,9 @@ impl Config {
 
     /// Initialize default config file in current directory
     pub fn init_default() -> Result<PathBuf, String> {
-        let path = PathBuf::from("wattson.toml");
+        let path = Self::default_path();
         if path.exists() {
-            return Err("wattson.toml already exists in current directory".to_string());
+            return Err(format!("wattson.toml already exists at {}", path.display()));
         }
         let config = Self::default();
         config.save_to(&path)?;
@@ -244,5 +293,56 @@ impl Config {
     /// Return the path of the config file being used (or None)
     pub fn active_path() -> Option<PathBuf> {
         Self::find_path()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("wattson-{prefix}-{unique}"))
+    }
+
+    #[test]
+    fn linked_worktree_prefers_primary_worktree_config() {
+        let root = temp_dir("primary-config");
+        let main_repo = root.join("main");
+        let worktree = root.join("gui-worktree");
+        let worktree_gitdir = main_repo.join(".git").join("worktrees").join("gui");
+
+        fs::create_dir_all(&worktree_gitdir).expect("create worktree gitdir");
+        fs::create_dir_all(&worktree).expect("create worktree dir");
+        fs::write(main_repo.join("wattson.toml"), "from='main'").expect("write main config");
+        fs::write(worktree.join("wattson.toml"), "from='worktree'").expect("write worktree config");
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", worktree_gitdir.display()),
+        )
+        .expect("write worktree .git");
+
+        let resolved = Config::find_path_for(&worktree, None);
+
+        assert_eq!(resolved, Some(main_repo.join("wattson.toml")));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn normal_repo_prefers_local_config_when_not_in_linked_worktree() {
+        let root = temp_dir("local-config");
+        fs::create_dir_all(&root).expect("create temp root");
+        fs::write(root.join("wattson.toml"), "from='local'").expect("write local config");
+
+        let resolved = Config::find_path_for(&root, None);
+
+        assert_eq!(resolved, Some(root.join("wattson.toml")));
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

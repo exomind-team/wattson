@@ -51,3 +51,21 @@ fn gui_app_reports_refresh_performance_targets() {
     assert!((perf.target_fps - 50.0).abs() < 0.1);
     assert!(perf.frame_time_ms >= 0.0);
 }
+
+#[test]
+fn gui_app_updates_persisted_window_dimensions_from_viewport_changes() {
+    let mut app = GuiApp::demo();
+
+    app.sync_window_size(1600.0, 960.0);
+
+    assert_eq!(app.settings().window_width, 1600);
+    assert_eq!(app.settings().window_height, 960);
+}
+
+#[test]
+fn gui_demo_prefills_enough_history_for_the_default_chart_window() {
+    let app = GuiApp::demo();
+    let metrics = app.summary_metrics().expect("summary metrics");
+
+    assert!(metrics.session_duration_s >= app.settings().chart_window_s as f64 - 1.0);
+}

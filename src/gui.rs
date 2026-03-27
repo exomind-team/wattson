@@ -172,7 +172,10 @@ impl GuiApp {
 
         app.set_poll_interval_ms(app.settings.poll_interval_ms);
         if demo {
-            app.seed_demo_history(180);
+            let chart_window_samples =
+                (app.settings.chart_window_s.saturating_mul(1000) / app.settings.poll_interval_ms)
+                    + 1;
+            app.seed_demo_history(chart_window_samples.max(180));
         } else {
             app.ingest_sample(true);
         }
@@ -206,6 +209,11 @@ impl GuiApp {
         {
             handle.set_poll_ms(clamped);
         }
+    }
+
+    pub fn sync_window_size(&mut self, width: f32, height: f32) {
+        self.settings.window_width = width.round().max(1.0) as u32;
+        self.settings.window_height = height.round().max(1.0) as u32;
     }
 
     pub fn visible_series_count(&self) -> usize {
@@ -606,8 +614,8 @@ impl GuiApp {
                 ));
                 ui.separator();
                 ui.label(format!(
-                    "Data age 数据龄期: {:.1}s",
-                    latest.snapshot.meta.data_age_s
+                    "Data age 数据龄期: {}",
+                    format_data_age(latest.snapshot.meta.data_age_s)
                 ));
                 ui.separator();
                 ui.label(format!("Errors 错误: {}", latest.snapshot.meta.error_count));
@@ -619,6 +627,8 @@ impl GuiApp {
 impl App for GuiApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut Frame) {
         self.apply_theme(ctx);
+        let viewport_size = ctx.content_rect().size();
+        self.sync_window_size(viewport_size.x, viewport_size.y);
         self.ingest_sample(false);
         self.update_frame_timing();
         ctx.request_repaint_after(Duration::from_millis(self.settings.ui_refresh_ms));
@@ -661,4 +671,23 @@ fn format_duration_hms(duration_s: f64) -> String {
     let minutes = ((duration_s % 3600.0) / 60.0) as u64;
     let seconds = (duration_s % 60.0) as u64;
     format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+fn format_data_age(data_age_s: f64) -> String {
+    if !data_age_s.is_finite() {
+        return "N/A 未知".to_string();
+    }
+
+    format!("{data_age_s:.1}s")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_data_age_hides_non_finite_values() {
+        assert_eq!(format_data_age(f64::INFINITY), "N/A 未知");
+        assert_eq!(format_data_age(f64::NAN), "N/A 未知");
+    }
 }

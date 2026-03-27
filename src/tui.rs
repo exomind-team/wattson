@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -15,6 +16,7 @@ use ratatui::widgets::{
 use crate::config::Config;
 use crate::data::PsuSnapshot;
 use crate::history::History;
+use crate::runtime::RuntimeState;
 use crate::serial::PsuHandle;
 
 /// Maximum number of samples in chart history
@@ -22,9 +24,6 @@ const CHART_HISTORY_LEN: usize = 120;
 
 /// Cost accumulator for the TUI session
 struct CostState {
-    total_wh: f64,
-    last_sample: Instant,
-    start_time: Instant,
     price_per_kwh: f64,
     currency: String,
 }
@@ -120,13 +119,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
 
     // Load persistent history
     let mut persistent = History::load();
-    let history_wh_base = persistent.total_wh;
-    let history_duration_base = persistent.total_duration_s;
-
-    let mut cost = CostState {
-        total_wh: 0.0,
-        last_sample: Instant::now(),
-        start_time: Instant::now(),
+    let cost = CostState {
         price_per_kwh: config.cost.price_per_kwh,
         currency: config.cost.currency.clone(),
     };
@@ -135,6 +128,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
     let mut chart_scale = ChartScale::Auto;
     let mut tick_ms: u64 = refresh_ms.max(200);
     let mut last_tick = Instant::now();
+    let mut runtime = RuntimeState::new(config.cost.price_per_kwh, config.cost.currency.clone());
 
     loop {
         // Wait for either a tick or an event (whichever comes first)
@@ -201,27 +195,13 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
         last_tick = Instant::now();
 
         let snap = handle.latest();
-
-        // Accumulate energy: power(W) * time(h) = Wh
-        let elapsed_h = cost.last_sample.elapsed().as_secs_f64() / 3600.0;
-        cost.total_wh += snap.power.ac_input_w * elapsed_h;
-        cost.last_sample = Instant::now();
+        runtime.push_snapshot(Utc::now(), snap.clone());
 
         // Push to chart history
         chart_history.push(snap.power.ac_input_w, snap.power.dc_output_est_w);
 
-        let duration_s = cost.start_time.elapsed().as_secs_f64();
-        // All-time totals (history + current session)
-        let alltime_wh = history_wh_base + cost.total_wh;
-        let alltime_duration_s = history_duration_base + duration_s;
-        let alltime_duration_h = alltime_duration_s / 3600.0;
-        let alltime_kwh = alltime_wh / 1000.0;
-        let alltime_cost = alltime_kwh * cost.price_per_kwh;
-        let alltime_avg_w = if alltime_duration_h > 0.0 {
-            alltime_wh / alltime_duration_h
-        } else {
-            snap.power.ac_input_w
-        };
+        let session_stats = runtime.stats();
+        let alltime_stats = runtime.all_time_stats(&persistent);
         let currency = cost.currency.clone();
         let price = cost.price_per_kwh;
 
@@ -229,13 +209,14 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
             render_ui(
                 f,
                 &snap,
-                alltime_kwh,
-                alltime_cost,
+                alltime_stats.total_kwh,
+                alltime_stats.total_cost,
                 &currency,
                 price,
-                alltime_duration_s,
+                session_stats.duration_s,
                 &chart_history,
-                alltime_avg_w,
+                session_stats.average_ac_input_w,
+                session_stats.average_dc_output_w,
                 chart_scale,
                 tick_ms,
             );
@@ -243,8 +224,7 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
     }
 
     // Save history on exit
-    let session_duration = cost.start_time.elapsed().as_secs_f64();
-    persistent.finish_session(cost.total_wh, session_duration);
+    persistent.finish_session(runtime.session_wh(), runtime.session_duration_s());
     match persistent.save() {
         Ok(path) => log::info!("History saved to {}", path.display()),
         Err(e) => log::warn!("Failed to save history: {}", e),
@@ -265,7 +245,8 @@ fn render_ui(
     price: f64,
     duration_s: f64,
     history: &ChartHistory,
-    ac_avg_w: f64,
+    session_ac_avg_w: f64,
+    session_dc_avg_w: f64,
     chart_scale: ChartScale,
     tick_ms: u64,
 ) {
@@ -319,7 +300,7 @@ fn render_ui(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[1]);
 
-    render_power_panel(f, snap, ac_avg_w, middle_chunks[0]);
+    render_power_panel(f, snap, session_ac_avg_w, session_dc_avg_w, middle_chunks[0]);
     render_dc_panel(f, snap, middle_chunks[1]);
 
     // Chart section
@@ -339,7 +320,7 @@ fn render_ui(
         currency,
         price,
         duration_s,
-        ac_avg_w,
+        session_ac_avg_w,
         bottom_chunks[1],
     );
 
@@ -362,7 +343,13 @@ fn render_ui(
     f.render_widget(status, main_chunks[4]);
 }
 
-fn render_power_panel(f: &mut Frame, snap: &PsuSnapshot, session_avg_w: f64, area: Rect) {
+fn render_power_panel(
+    f: &mut Frame,
+    snap: &PsuSnapshot,
+    session_avg_w: f64,
+    session_dc_avg_w: f64,
+    area: Rect,
+) {
     let ac_color = if snap.power.ac_input_w > 500.0 {
         Color::Red
     } else if snap.power.ac_input_w > 200.0 {
@@ -380,6 +367,7 @@ fn render_power_panel(f: &mut Frame, snap: &PsuSnapshot, session_avg_w: f64, are
             ),
         ]),
         Line::from(format!("  AC Avg:    {:>7.1} W", session_avg_w)),
+        Line::from(format!("  DC Avg:    {:>7.1} W", session_dc_avg_w)),
         Line::from(format!(
             "  DC Output: {:>7.1} W",
             snap.power.dc_output_est_w

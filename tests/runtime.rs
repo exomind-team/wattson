@@ -1,6 +1,7 @@
 use chrono::{Duration, TimeZone, Utc};
 
 use wattson::data::PsuSnapshot;
+use wattson::history::History;
 use wattson::runtime::{DemoGenerator, RuntimeState};
 
 fn sample_snapshot(ac_input_w: f64, dc_output_w: f64) -> PsuSnapshot {
@@ -47,6 +48,30 @@ fn runtime_accumulates_energy_and_cost_from_samples() {
     assert!((stats.total_cost - 0.056).abs() < 1e-6);
     assert_eq!(stats.currency, "CNY");
     assert!((stats.average_ac_input_w - 100.0).abs() < 1e-6);
+    assert!((stats.average_dc_output_w - 80.0).abs() < 1e-6);
+    assert!((stats.duration_s - 3600.0).abs() < 1e-6);
+}
+
+#[test]
+fn runtime_combines_session_and_history_for_all_time_metrics() {
+    let mut state = RuntimeState::new(0.56, "CNY");
+    let t0 = Utc.with_ymd_and_hms(2026, 3, 26, 12, 0, 0).unwrap();
+
+    state.push_snapshot(t0, sample_snapshot(200.0, 150.0));
+    state.push_snapshot(t0 + Duration::minutes(30), sample_snapshot(100.0, 50.0));
+
+    let history = History {
+        total_wh: 300.0,
+        total_duration_s: 7200.0,
+        ..History::default()
+    };
+
+    let stats = state.all_time_stats(&history);
+
+    assert!((stats.total_kwh - 0.4).abs() < 1e-6);
+    assert!((stats.total_cost - 0.224).abs() < 1e-6);
+    assert!((stats.average_ac_input_w - 160.0).abs() < 1e-6);
+    assert!((stats.duration_s - 9000.0).abs() < 1e-6);
 }
 
 #[test]

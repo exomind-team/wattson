@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use chrono::{DateTime, Utc};
 
 use crate::data::PsuSnapshot;
+use crate::history::History;
 
 const MAX_HISTORY_SAMPLES: usize = 4096;
 
@@ -20,12 +21,25 @@ pub struct RuntimeStats {
     pub total_cost: f64,
     pub currency: String,
     pub average_ac_input_w: f64,
+    pub average_dc_output_w: f64,
+    pub duration_s: f64,
+}
+
+/// All-time stats (history + current session) / 全历史统计（历史 + 当前会话）
+#[derive(Debug, Clone)]
+pub struct AllTimeStats {
+    pub total_kwh: f64,
+    pub total_cost: f64,
+    pub currency: String,
+    pub average_ac_input_w: f64,
+    pub duration_s: f64,
 }
 
 /// GUI-facing runtime state / 面向 GUI 的运行时状态
 pub struct RuntimeState {
     history: VecDeque<TimedSnapshot>,
     session_wh: f64,
+    session_dc_wh: f64,
     price_per_kwh: f64,
     currency: String,
 }
@@ -35,6 +49,7 @@ impl RuntimeState {
         Self {
             history: VecDeque::with_capacity(512),
             session_wh: 0.0,
+            session_dc_wh: 0.0,
             price_per_kwh,
             currency: currency.into(),
         }
@@ -44,8 +59,9 @@ impl RuntimeState {
         if let Some(previous) = self.history.back() {
             let elapsed = timestamp - previous.timestamp;
             if let Ok(elapsed_std) = elapsed.to_std() {
-                self.session_wh +=
-                    previous.snapshot.power.ac_input_w * elapsed_std.as_secs_f64() / 3600.0;
+                let elapsed_h = elapsed_std.as_secs_f64() / 3600.0;
+                self.session_wh += previous.snapshot.power.ac_input_w * elapsed_h;
+                self.session_dc_wh += previous.snapshot.power.dc_output_est_w * elapsed_h;
             }
         }
 
@@ -76,19 +92,21 @@ impl RuntimeState {
     }
 
     pub fn stats(&self) -> RuntimeStats {
-        let duration_h = self
-            .history
-            .front()
-            .zip(self.history.back())
-            .and_then(|(first, last)| (last.timestamp - first.timestamp).to_std().ok())
-            .map(|duration| duration.as_secs_f64() / 3600.0)
-            .unwrap_or(0.0);
+        let duration_s = self.session_duration_s();
+        let duration_h = duration_s / 3600.0;
 
         let average_ac_input_w = if duration_h > 0.0 {
             self.session_wh / duration_h
         } else {
             self.latest()
                 .map(|sample| sample.snapshot.power.ac_input_w)
+                .unwrap_or(0.0)
+        };
+        let average_dc_output_w = if duration_h > 0.0 {
+            self.session_dc_wh / duration_h
+        } else {
+            self.latest()
+                .map(|sample| sample.snapshot.power.dc_output_est_w)
                 .unwrap_or(0.0)
         };
 
@@ -99,6 +117,30 @@ impl RuntimeState {
             total_cost: total_kwh * self.price_per_kwh,
             currency: self.currency.clone(),
             average_ac_input_w,
+            average_dc_output_w,
+            duration_s,
+        }
+    }
+
+    pub fn all_time_stats(&self, history: &History) -> AllTimeStats {
+        let total_wh = history.total_wh + self.session_wh;
+        let total_duration_s = history.total_duration_s + self.session_duration_s();
+        let total_duration_h = total_duration_s / 3600.0;
+        let total_kwh = total_wh / 1000.0;
+        let average_ac_input_w = if total_duration_h > 0.0 {
+            total_wh / total_duration_h
+        } else {
+            self.latest()
+                .map(|sample| sample.snapshot.power.ac_input_w)
+                .unwrap_or(0.0)
+        };
+
+        AllTimeStats {
+            total_kwh,
+            total_cost: total_kwh * self.price_per_kwh,
+            currency: self.currency.clone(),
+            average_ac_input_w,
+            duration_s: total_duration_s,
         }
     }
 

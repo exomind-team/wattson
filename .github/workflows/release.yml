@@ -23,7 +23,7 @@ jobs:
             artifact: wattson
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -43,7 +43,7 @@ jobs:
           cd target/${{ matrix.target }}/release
           7z a ../../../wattson-${{ matrix.target }}.zip ${{ matrix.artifact }}
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wattson-${{ matrix.target }}
           path: wattson-${{ matrix.target }}.*
@@ -52,11 +52,16 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: wattson-*
-          generate_release_notes: true
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" wattson-* --clobber
+          else
+            gh release create "$tag" wattson-* --title "$tag" --generate-notes
+          fi

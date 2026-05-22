@@ -16,18 +16,22 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install system deps (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libfontconfig1-dev
-      - name: Build
-        run: cargo build --release
-      - name: Test
-        run: cargo test
+      # Core build (no optional deps — fastest smoke test)
+      - name: Build (core, no-default-features)
+        run: cargo build --no-default-features
+      # Full build (default = ["full"]) — same as before
+      - name: Build (full)
+        run: cargo build --release --features full
+      - name: Test (full)
+        run: cargo test --features full
       - name: Upload binary
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: wattson-${{ matrix.os }}
           path: |
@@ -37,19 +41,24 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - name: Install system deps
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libfontconfig1-dev
-      - run: cargo clippy -- -D warnings
+      # full features: --all-targets is safe here because tests are gated on their features
+      - name: Clippy (full)
+        run: cargo clippy --all-targets --features full -- -D warnings
+      # core only: restrict to --lib so tests requiring gui/runtime are skipped
+      - name: Clippy (core, no-default-features)
+        run: cargo clippy --lib --no-default-features -- -D warnings
 
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --check
+      - run: cargo fmt --all --check

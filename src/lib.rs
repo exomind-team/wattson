@@ -15,21 +15,36 @@
 //! println!("AC Input: {:.1}W", snapshot.power.ac_input_w);
 //! ```
 
-pub mod api;
-pub mod chart;
-pub mod config;
+// Core modules (always compiled)
 pub mod data;
 pub mod error;
-pub mod gui;
-pub mod gui_settings;
-pub mod history;
 pub mod protocol;
-pub mod runtime;
 pub mod serial;
+
+// Optional modules
+#[cfg(feature = "server")]
+pub mod api;
+#[cfg(feature = "chart")]
+pub mod chart;
+#[cfg(feature = "config")]
+pub mod config;
+#[cfg(feature = "gui")]
+pub mod gui;
+#[cfg(feature = "gui")]
+pub mod gui_settings;
+#[cfg(feature = "history")]
+pub mod history;
+#[cfg(feature = "runtime")]
+pub mod runtime;
+#[cfg(feature = "tui")]
 pub mod tui;
 
-pub use config::Config;
+// Core re-exports (always available)
 pub use data::{CostData, DeviceProfile, PsuSnapshot};
 pub use error::{Result, WattsonError};
 pub use protocol::FanMode;
 pub use serial::{Mode, PsuHandle, PsuMonitor};
+
+// Test utility re-export
+#[cfg(test)]
+pub use serial::test_handle_with_recorder;

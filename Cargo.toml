@@ -21,12 +21,12 @@ exclude = [
 ]
 
 [features]
-default = []
-gui = ["dep:eframe", "dep:egui", "dep:egui_plot", "dep:image"]
-tui = ["dep:ratatui", "dep:crossterm"]
-chart = ["dep:plotters"]
+default = ["full"]
+gui = ["runtime", "dep:eframe", "dep:egui", "dep:egui_plot", "dep:image"]
+tui = ["runtime", "dep:ratatui", "dep:crossterm"]
+chart = ["history", "dep:plotters"]
 cli = ["dep:clap"]
-server = ["dep:axum", "dep:tokio", "dep:tower-http"]
+server = ["config", "dep:axum", "dep:tokio", "dep:tower-http"]
 config = ["dep:toml", "dep:dirs"]
 history = ["config", "dep:chrono"]
 runtime = ["history"]
@@ -64,7 +64,7 @@ tower = { version = "0.5", features = ["util"] }
 [[bin]]
 name = "wattson"
 path = "src/main.rs"
-required-features = ["cli", "server"]
+required-features = ["full"]
 
 [[example]]
 name = "json_dump"

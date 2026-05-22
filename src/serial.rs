@@ -23,7 +23,7 @@ pub enum Mode {
 type SharedState = Arc<Mutex<PsuState>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SerialCommand {
+pub(crate) enum SerialCommand {
     Mode(FanMode),
     Curve(Vec<(u8, u8)>),
     Pwm(u8),
@@ -476,7 +476,7 @@ fn process_payload(payload: &[u8], profile: &DeviceProfile, state: &SharedState)
 }
 
 #[cfg(test)]
-pub fn test_handle_with_recorder(
+pub(crate) fn test_handle_with_recorder(
     snapshot: PsuSnapshot,
 ) -> (PsuHandle, Receiver<SerialCommand>) {
     let mut state_value = PsuState::new();

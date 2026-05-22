@@ -44,7 +44,3 @@ pub use data::{CostData, DeviceProfile, PsuSnapshot};
 pub use error::{Result, WattsonError};
 pub use protocol::FanMode;
 pub use serial::{Mode, PsuHandle, PsuMonitor};
-
-// Test utility re-export
-#[cfg(test)]
-pub use serial::test_handle_with_recorder;

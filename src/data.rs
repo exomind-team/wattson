@@ -146,9 +146,9 @@ impl Default for DeviceProfile {
 
 impl DeviceProfile {
     pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "segotep_dm" | "segotep_dm1000g" => Some(Self::SEGOTEP_DM),
-            "segotep_dm850g" => Some(Self::DM850G),
+        match name.to_lowercase().as_str() {
+            "segotep_dm" | "dm1000g" | "dm-1000g" | "segotep_dm1000g" => Some(Self::SEGOTEP_DM),
+            "dm850g" | "dm-850g" | "segotep_dm850g" => Some(Self::DM850G),
             _ => None,
         }
     }

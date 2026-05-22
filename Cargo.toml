@@ -20,28 +20,41 @@ exclude = [
     "**/tests/snapshots/**/*.new.png",
 ]
 
+[features]
+default = []
+gui = ["dep:eframe", "dep:egui", "dep:egui_plot", "dep:image"]
+tui = ["dep:ratatui", "dep:crossterm"]
+chart = ["dep:plotters"]
+cli = ["dep:clap"]
+server = ["dep:axum", "dep:tokio", "dep:tower-http"]
+config = ["dep:toml", "dep:dirs"]
+history = ["config", "dep:chrono"]
+runtime = ["history"]
+full = ["gui", "tui", "chart", "cli", "server", "history", "runtime"]
+
 [dependencies]
+# Core (always compiled)
 serialport = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 log = "0.4"
-clap = { version = "4", features = ["derive"] }
-ratatui = "0.29"
-crossterm = "0.28"
-axum = "0.8"
-tokio = { version = "1", features = ["full"] }
-toml = "0.8"
-plotters = "0.3"
-chrono = { version = "0.4", features = ["serde"] }
-dirs = "6"
-tower-http = { version = "0.6", features = ["cors"] }
-# Keep Linux window backends enabled when opting out of eframe defaults.
-# 在关闭 eframe 默认特性时，显式保留 Linux 所需的 x11 / wayland 后端。
-eframe = { version = "0.34", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
-egui = "0.34"
-egui_plot = "0.35"
-image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Optional
+eframe = { version = "0.34", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"], optional = true }
+egui = { version = "0.34", optional = true }
+egui_plot = { version = "0.35", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
+plotters = { version = "0.3", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+axum = { version = "0.8", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+tower-http = { version = "0.6", features = ["cors"], optional = true }
+toml = { version = "0.8", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+dirs = { version = "6", optional = true }
 
 [dev-dependencies]
 env_logger = "0.11"
@@ -51,6 +64,7 @@ tower = { version = "0.5", features = ["util"] }
 [[bin]]
 name = "wattson"
 path = "src/main.rs"
+required-features = ["cli", "server"]
 
 [[example]]
 name = "json_dump"

@@ -188,15 +188,11 @@ pub fn run(handle: &PsuHandle, config: &Config, refresh_ms: u64) -> io::Result<(
                                     ChartScale::Auto => ChartScale::Zero,
                                 };
                             }
-                            KeyCode::Char('+') | KeyCode::Char('=') => {
-                                if tick_ms > 200 {
-                                    tick_ms -= 100;
-                                }
+                            KeyCode::Char('+') | KeyCode::Char('=') if tick_ms > 200 => {
+                                tick_ms -= 100;
                             }
-                            KeyCode::Char('-') => {
-                                if tick_ms < 2000 {
-                                    tick_ms += 100;
-                                }
+                            KeyCode::Char('-') if tick_ms < 2000 => {
+                                tick_ms += 100;
                             }
                             KeyCode::Char(']') => {
                                 let ms = handle.poll_ms();

@@ -143,3 +143,13 @@ impl Default for DeviceProfile {
         Self::SEGOTEP_DM
     }
 }
+
+impl DeviceProfile {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "segotep_dm" | "segotep_dm1000g" => Some(Self::SEGOTEP_DM),
+            "segotep_dm850g" => Some(Self::DM850G),
+            _ => None,
+        }
+    }
+}
